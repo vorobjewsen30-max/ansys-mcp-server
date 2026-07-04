@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "ansys-mcp-server"
+version = "1.0.0"
+description = "MCP Server for Ansys engineering simulation — enables Claude Code CLI to run simulations, manage meshes, process results, and configure models via PyAnsys"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Ansys MCP Server Contributors"},
+]
+keywords = ["ansys", "mcp", "claude", "simulation", "fea", "cfd", "pyansys"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+fluent = ["ansys-fluent-core>=0.20"]
+mechanical = ["ansys-mechanical-core>=0.5"]
+dpf = ["ansys-dpf-core>=0.7"]
+mapdl = ["ansys-mapdl-core>=0.60"]
+meshing = ["ansys-meshing-prime>=0.3"]
+systemcoupling = ["ansys-systemcoupling-core>=0.1"]
+all = [
+    "ansys-fluent-core>=0.20",
+    "ansys-mechanical-core>=0.5",
+    "ansys-dpf-core>=0.7",
+    "ansys-mapdl-core>=0.60",
+    "ansys-meshing-prime>=0.3",
+]
+
+[project.scripts]
+ansys-mcp-server = "ansys_mcp_server.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
