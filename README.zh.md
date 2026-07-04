@@ -272,6 +272,12 @@ export ANSYS_PLATFORM_INSTANCEMANAGEMENT_CONFIG="/路径/到/配置"
 **问：可以在笔记本电脑上运行吗？**
 答：可以，适用于中小型模型。16GB RAM 的笔记本可以处理约 2-5 百万 CFD 单元或约 50 万 FEA 节点的网格。学生许可证与此服务器兼容。
 
+**问：重启电脑后需要手动启动 MCP 服务器吗？**
+答：不需要。如果通过 `claude_desktop_config.json` 配置（`install.sh` 会自动完成），Claude Code CLI 会在启动时自动启动 MCP 服务器。只需打开 Claude Code 即可。手动测试：`./install.sh run`（或 `source .venv/bin/activate && cd src && python -m ansys_mcp_server.server`）。
+
+**问：如何检查服务器是否在运行？**
+答：在 Claude Code 中问：*"安装了哪些 Ansys 包？"* — 如果回复了，服务器就在运行。也可以检查进程：`ps aux | grep ansys_mcp_server`。如有问题，验证 `~/.claude/claude_desktop_config.json` 中的路径指向正确的 `.venv/bin/python`。
+
 ## 🤝 贡献
 
 ```bash

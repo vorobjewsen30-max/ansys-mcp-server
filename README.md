@@ -272,6 +272,12 @@ A: No — the MCP server has no artificial limits. The only limits are your hard
 **Q: Can it run on a laptop?**
 A: Yes, for small-to-medium models. A laptop with 16GB RAM can handle meshes up to ~2-5 million cells for CFD or ~500k nodes for FEA. Student licenses work fine with this server.
 
+**Q: After rebooting my PC, do I need to restart the MCP server manually?**
+A: No. If you configured it via `claude_desktop_config.json` (which `install.sh` does automatically), Claude Code CLI starts the MCP server on launch. Just open Claude Code and it works. To test manually: `./install.sh run` (or `source .venv/bin/activate && cd src && python -m ansys_mcp_server.server`).
+
+**Q: How do I check if the server is running?**
+A: In Claude Code, ask: *"What Ansys packages are installed?"* — if it responds, the server is alive. You can also check the terminal for any Python process running `ansys_mcp_server.server`. If there's an issue, verify the path in `~/.claude/claude_desktop_config.json` points to the correct `.venv/bin/python`.
+
 ## 🤝 Contributing
 
 ```bash
