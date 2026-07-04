@@ -57,7 +57,7 @@ cd ansys-mcp-server
 1. Создаст виртуальное окружение `.venv`
 2. Установит `mcp` SDK
 3. Опционально установит PyAnsys (`./install.sh install-all` для всего)
-4. Пропишет конфиг в `~/.claude/claude_desktop_config.json`
+4. Пропишет конфиг в `~/.claude/settings.json`
 
 ### Способ 2: Вручную
 
@@ -74,8 +74,8 @@ pip install ansys-mapdl-core         # Прочность / APDL
 pip install ansys-dpf-core           # Пост-обработка
 pip install ansys-meshing-prime      # Сетки
 
-# 4. Настроить Claude Code
-# Добавить в ~/.claude/claude_desktop_config.json:
+# 4. Настроить Claude Code CLI (~/.claude/settings.json)
+# Добавить в ~/.claude/settings.json:
 ```
 
 ```json
@@ -274,10 +274,10 @@ export ANSYS_PLATFORM_INSTANCEMANAGEMENT_CONFIG="/путь/к/конфигу"
 О: Да, для моделей малого и среднего размера. Ноутбук с 16 ГБ RAM осилит сетки до ~2-5 млн ячеек для CFD или ~500k узлов для МКЭ. Студенческие лицензии работают с этим сервером.
 
 **В: После перезагрузки ПК нужно вручную запускать MCP-сервер?**
-О: Нет. Если настроено через `claude_desktop_config.json` (что `install.sh` делает автоматически), Claude Code CLI сам запускает MCP-сервер при старте. Просто откройте Claude Code и работайте. Для ручного теста: `./install.sh run` (или `source .venv/bin/activate && cd src && python -m ansys_mcp_server.server`).
+О: Нет. Если настроено через `settings.json` (что `install.sh` делает автоматически), Claude Code CLI сам запускает MCP-сервер при старте. Просто откройте Claude Code и работайте. Для ручного теста: `./install.sh run` (или `source .venv/bin/activate && cd src && python -m ansys_mcp_server.server`).
 
 **В: Как проверить, что сервер работает?**
-О: Спросите в Claude Code: *"Какие пакеты Ansys установлены?"* — если отвечает, сервер жив. Можно также проверить процессы: `ps aux | grep ansys_mcp_server`. Если проблемы — проверьте путь в `~/.claude/claude_desktop_config.json`, он должен указывать на `.venv/bin/python`.
+О: Спросите в Claude Code: *"Какие пакеты Ansys установлены?"* — если отвечает, сервер жив. Можно также проверить процессы: `ps aux | grep ansys_mcp_server`. Если проблемы — проверьте путь в `~/.claude/settings.json`, он должен указывать на `.venv/bin/python`.
 
 ## 🤝 Участие в разработке
 

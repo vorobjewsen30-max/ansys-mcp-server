@@ -138,9 +138,11 @@ fi
 echo ""
 echo -e "${BOLD}[4/4]${RESET} Configuring Claude Code CLI..."
 
-# Determine config path
+# Claude Code CLI uses ~/.claude/settings.json
+# Claude Desktop uses ~/.claude/claude_desktop_config.json (also supported as fallback)
 CLAUDE_DIR="${HOME}/.claude"
-SETTINGS_FILE="${CLAUDE_DIR}/claude_desktop_config.json"
+SETTINGS_FILE="${CLAUDE_DIR}/settings.json"
+DESKTOP_CONFIG="${CLAUDE_DIR}/claude_desktop_config.json"
 
 # Ensure .claude directory exists
 mkdir -p "$CLAUDE_DIR"
@@ -148,18 +150,24 @@ mkdir -p "$CLAUDE_DIR"
 # Python path in venv
 SERVER_PYTHON="$VENV_DIR/bin/python"
 
-# Write config using Python (handles JSON merging safely)
+# Build server config
+SERVER_JSON=$(cat <<END_JSON
+{
+    "ansys": {
+        "command": "$SERVER_PYTHON",
+        "args": ["-m", "ansys_mcp_server.server"],
+        "cwd": "$SRC_DIR"
+    }
+}
+END_JSON
+)
+
+# Write to Claude Code CLI config (~/.claude/settings.json)
 python3 -c "
 import json, os
 
 config_file = os.path.expanduser('$SETTINGS_FILE')
-server_config = {
-    'ansys': {
-        'command': '$SERVER_PYTHON',
-        'args': ['-m', 'ansys_mcp_server.server'],
-        'cwd': '$SRC_DIR'
-    }
-}
+server_config = json.loads(r'''$SERVER_JSON''')
 
 config = {}
 if os.path.exists(config_file):
@@ -177,10 +185,34 @@ config['mcpServers']['ansys'] = server_config['ansys']
 with open(config_file, 'w') as f:
     json.dump(config, f, indent=2, ensure_ascii=False)
 
-print(f'Config written to: {config_file}')
-print(f'Python:  $SERVER_PYTHON')
-print(f'CWD:     $SRC_DIR')
+print(f'✅ Claude Code CLI config: {config_file}')
 "
+
+# Also write to Claude Desktop config (for users who have both)
+python3 -c "
+import json, os
+
+config_file = os.path.expanduser('$DESKTOP_CONFIG')
+server_config = json.loads(r'''$SERVER_JSON''')
+
+config = {}
+if os.path.exists(config_file):
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+    except:
+        config = {}
+
+if 'mcpServers' not in config:
+    config['mcpServers'] = {}
+
+config['mcpServers']['ansys'] = server_config['ansys']
+
+with open(config_file, 'w') as f:
+    json.dump(config, f, indent=2, ensure_ascii=False)
+
+print(f'✅ Claude Desktop config: {config_file}')
+" 2>/dev/null || true
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${RESET}"

@@ -122,7 +122,8 @@ echo %BOLD%[4/4]%RESET% Configuring Claude Code CLI...
 
 :: Determine config paths
 set "CLAUDE_DIR=%USERPROFILE%\.claude"
-set "SETTINGS_FILE=%CLAUDE_DIR%\claude_desktop_config.json"
+set "SETTINGS_FILE=%CLAUDE_DIR%\settings.json"
+set "DESKTOP_CONFIG=%CLAUDE_DIR%\claude_desktop_config.json"
 
 :: Create .claude directory if needed
 if not exist "%CLAUDE_DIR%" mkdir "%CLAUDE_DIR%"
