@@ -452,6 +452,30 @@ TOOLS = [
         },
     ),
     Tool(
+        name="ansys_load_geometry",
+        description="Load a CAD geometry file into Ansys for meshing and simulation. Supports .stp, .step, .iges, .igs, .scdoc, .agdb, .pmdb, .x_t, .sat formats. Call this FIRST when starting from a CAD file.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "solver": {
+                    "type": "string",
+                    "enum": ["fluent", "mechanical", "mapdl"],
+                    "description": "Target solver for the geometry",
+                },
+                "geometry_file": {
+                    "type": "string",
+                    "description": "Absolute path to the CAD/geometry file",
+                },
+                "import_format": {
+                    "type": "string",
+                    "enum": ["stp", "step", "iges", "igs", "scdoc", "agdb", "pmdb", "x_t", "sat", "auto"],
+                    "description": "Format of the geometry file (default: auto-detect from extension)",
+                },
+            },
+            "required": ["solver", "geometry_file"],
+        },
+    ),
+    Tool(
         name="ansys_mesh_convert",
         description="Convert mesh between formats (.msh ↔ .cas ↔ .cdb ↔ .vtu ↔ .pmdb)",
         inputSchema={
@@ -1136,6 +1160,110 @@ async def handle_watch_simulation(solver: str, interval_seconds: float = 5.0) ->
         f"   - Mechanical: result = model.solve() and check convergence\n"
         f"   - MAPDL: mapdl.solve() returns convergence status\n"
     )
+
+
+async def handle_load_geometry(solver: str, geometry_file: str, import_format: str = "auto") -> str:
+    """Handle ansys_load_geometry — load CAD file into Ansys for further processing."""
+    geom_path = Path(geometry_file)
+    if not geom_path.exists():
+        return f"❌ ERROR: Geometry file not found: {geometry_file}"
+
+    # Auto-detect format
+    if import_format == "auto":
+        ext = geom_path.suffix.lower().lstrip(".")
+        format_map = {
+            "stp": "stp", "step": "step", "iges": "iges", "igs": "igs",
+            "scdoc": "scdoc", "agdb": "agdb", "pmdb": "pmdb",
+            "x_t": "parasolid", "x_t": "x_t", "sat": "sat",
+        }
+        import_format = format_map.get(ext, ext)
+
+    file_size_mb = geom_path.stat().st_size / (1024 * 1024)
+
+    lines = [
+        f"📐 LOADING GEOMETRY — {solver.upper()}",
+        f"",
+        f"   File:        {geometry_file}",
+        f"   Format:      {import_format.upper()}",
+        f"   Size:        {file_size_mb:.1f} MB",
+        f"",
+        f"   ✅ Geometry file found and ready.",
+        f"",
+    ]
+
+    # Per-solver loading instructions
+    if solver == "fluent":
+        lines.append("   ── Fluent Workflow ──")
+        lines.append("   1. Geometry loaded → next run ansys_mesh_generate")
+        lines.append("   2. Fluent Meshing imports the CAD directly")
+        lines.append("")
+        if ansys.has_fluent:
+            try:
+                pyfluent = ansys._load_fluent()
+                session = pyfluent.launch_fluent(mode="meshing")
+                ansys._fluent_session = session
+                ansys._connected_product = "fluent"
+                # Import geometry
+                session.workflow.TaskObject["Import Geometry"].Arguments["FileName"] = geometry_file
+                session.workflow.TaskObject["Import Geometry"].Execute()
+                lines.append("   ✅ Geometry LOADED into Fluent Meshing successfully!")
+                lines.append(f"   Session active — proceed with ansys_mesh_generate")
+            except Exception as e:
+                lines.append(f"   ⚠️ Could not auto-load via PyAnsys: {e}")
+                lines.append(f"   💡 Use Fluent GUI: File → Import → CAD → {geometry_file}")
+        else:
+            lines.append(f"   💡 Install PyAnsys for auto-load: pip install ansys-fluent-core")
+            lines.append(f"   💡 Or open Fluent → File → Import → CAD → {geometry_file}")
+
+    elif solver == "mechanical":
+        lines.append("   ── Mechanical Workflow ──")
+        lines.append("   1. Geometry loaded into Workbench/Mechanical")
+        lines.append("   2. Next: ansys_mesh_generate for meshing")
+        lines.append("")
+        if ansys.has_mechanical:
+            try:
+                pymech = ansys._load_mechanical()
+                session = pymech.launch_mechanical()
+                ansys._mechanical_session = session
+                ansys._connected_product = "mechanical"
+                # Import geometry via Mechanical API
+                session.DataModel.Project.Model.GeometryImportGroup.Add()
+                session.DataModel.Project.Model.GeometryImportGroup.Import(geometry_file)
+                lines.append("   ✅ Geometry LOADED into Mechanical successfully!")
+            except Exception as e:
+                lines.append(f"   ⚠️ Could not auto-load via PyAnsys: {e}")
+                lines.append(f"   💡 Use Workbench: right-click Geometry → Import → {geometry_file}")
+        else:
+            lines.append(f"   💡 Install: pip install ansys-mechanical-core")
+            lines.append(f"   💡 Or open Workbench → Geometry → Import → {geometry_file}")
+
+    elif solver == "mapdl":
+        lines.append("   ── MAPDL Workflow ──")
+        lines.append("   1. MAPDL imports geometry via ~SAT or ~IGES commands")
+        lines.append("   2. Next: ansys_mesh_generate to mesh the imported geometry")
+        lines.append("")
+        if ansys.has_mapdl:
+            try:
+                pymapdl = ansys._load_mapdl()
+                session = pymapdl.launch_mapdl()
+                ansys._mapdl_session = session
+                ansys._connected_product = "mapdl"
+                session.run("/PREP7")
+                if import_format in ("stp", "step"):
+                    session.run(f"~SATIN,'{geometry_file}',,,SOLIDS,0")
+                elif import_format in ("iges", "igs"):
+                    session.run(f"~IGESIN,'{geometry_file}',,,")
+                else:
+                    session.run(f"~SATIN,'{geometry_file}',,,SOLIDS,0")
+                lines.append("   ✅ Geometry LOADED into MAPDL successfully!")
+                lines.append("   Use ansys_mesh_generate to mesh it.")
+            except Exception as e:
+                lines.append(f"   ⚠️ Could not auto-load via PyAnsys: {e}")
+                lines.append(f"   💡 MAPDL command: ~SATIN,'{geometry_file}',,,SOLIDS,0")
+        else:
+            lines.append(f"   💡 Install: pip install ansys-mapdl-core")
+
+    return "\n".join(lines)
 
 
 async def handle_mesh_info(solver: str, mesh_file: str = None) -> str:
@@ -2075,6 +2203,7 @@ TOOL_HANDLERS = {
     "ansys_get_simulation_status": handle_get_simulation_status,
     "ansys_stop_simulation": handle_stop_simulation,
     "ansys_watch_simulation": handle_watch_simulation,
+    "ansys_load_geometry": handle_load_geometry,
     "ansys_mesh_info": handle_mesh_info,
     "ansys_mesh_generate": handle_mesh_generate,
     "ansys_mesh_refine": handle_mesh_refine,
