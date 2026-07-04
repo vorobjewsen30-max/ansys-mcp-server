@@ -222,19 +222,55 @@ If `fluent` or `mapdl` work from your terminal, the MCP server will work too.
 ## ❓ FAQ
 
 **Q: Does it work without a license?**
-A: The server runs and all 24 tools respond with guidance and API examples. But actual solver launch requires a licensed Ansys installation.
+A: The server runs and all tools respond with guidance and API examples. But actual solver launch requires a licensed Ansys installation. On a machine with a valid license, PyAnsys picks it up automatically.
 
 **Q: What Ansys versions are supported?**
 A: PyAnsys supports 2024 R1 and newer (versions 241+). This server targets 2025 R1 (251) by default but accepts any version.
 
 **Q: Can it run on a remote HPC cluster?**
-A: Yes — PyAnsys supports connecting to remote Fluent/Mechanical instances. Configure via `ANSYS_PLATFORM_INSTANCEMANAGEMENT_CONFIG` (PyPIM).
+A: Yes — PyAnsys supports connecting to remote Fluent/Mechanical instances. Configure via `ANSYS_PLATFORM_INSTANCEMANAGEMENT_CONFIG` (PyPIM). For Slurm-based clusters, use `ansys-mapdl-core` with `launch_mapdl(start_instance=False)` and point to the cluster's solver binary.
 
 **Q: Is this affiliated with Ansys/Synopsys?**
 A: No. This is an independent community project. Ansys and Fluent are trademarks of Ansys Inc. / Synopsys.
 
 **Q: Can Claude Code run a full parametric study?**
-A: Yes. Describe it: *"Run 10 cases varying inlet velocity from 1 to 10 m/s, collect pressure drop, make a plot"* — Claude Code will call the tools in a loop.
+A: Yes. Describe it: *"Run 10 cases varying inlet velocity from 1 to 10 m/s, collect pressure drop, make a plot"* — Claude Code calls the tools in a loop automatically.
+
+**Q: Can it work with my existing .cas/.dat/.mechdb/.inp files?**
+A: Yes. Use `ansys_run_simulation` with the `input_file` parameter pointing to your existing file. For CAD geometry (.stp, .iges, .scdoc), use `ansys_load_geometry` first.
+
+**Q: Does it save result files automatically?**
+A: Yes. After each simulation, result files are saved to the output directory: Fluent writes `.cas.h5` + `.dat.h5`, Mechanical writes `.rst`, MAPDL writes `.rst/.rth`. You can also manually export with `ansys_export_results` in CSV, VTK, HDF5, or NPZ format.
+
+**Q: What result formats can I get?**
+A: `ansys_export_results` supports: **CSV** (Excel/Python analysis), **VTK/VTU** (ParaView visualization), **HDF5** (efficient binary for ML pipelines), **EnSight** (professional post-processor), **NPZ** (NumPy-compatible). Plus auto-generated reports in Markdown/HTML/PDF.
+
+**Q: Can it handle transient (time-dependent) simulations?**
+A: Yes. Set time-stepping parameters via `ansys_set_parameters` with `{"time": "transient", "time_step_size": 0.01, "num_time_steps": 100}`. Then use `ansys_get_field_data` or `ansys_export_results` with the `timesteps` parameter to extract data at specific time steps.
+
+**Q: What turbulence models are available?**
+A: Through Fluent/MAPDL: k-epsilon (standard, RNG, realizable), k-omega (standard, SST), Spalart-Allmaras, Reynolds Stress, LES, DES. Describe what you need and Claude Code will configure the right one.
+
+**Q: Can it do multiphase simulations?**
+A: Yes — Fluent supports VOF, Eulerian, Mixture, and DPM models. Tell Claude Code: *"set up a VOF model for water-air free surface"* and it will configure the appropriate settings via `ansys_set_parameters`.
+
+**Q: Does it support CAD geometry from SolidWorks / Catia / NX / Fusion 360?**
+A: Yes. Export your CAD as `.stp` or `.iges` (standard exchange formats), then use `ansys_load_geometry`. All major CAD tools support STEP/IGES export.
+
+**Q: Can I use it on Windows while Ansys is running on Linux?**
+A: Yes. The MCP server runs wherever Claude Code runs. If your Ansys is on a Linux workstation, install the MCP server there and run Claude Code (or Claude Desktop) connecting to that server. You can also use SSH tunneling.
+
+**Q: What if the simulation diverges?**
+A: Claude Code can diagnose and fix it. If convergence fails, `ansys_get_convergence` shows which equations are problematic. Claude Code can then adjust under-relaxation factors, switch to first-order schemes, or refine the mesh — all through the existing tools.
+
+**Q: Can multiple users share one Ansys license?**
+A: The server doesn't manage license queuing — that's what the Ansys license manager does. If your license server has N seats, up to N simulations can run simultaneously. Exceeding that, PyAnsys will return a license error.
+
+**Q: Is there rate limiting or usage quotas?**
+A: No — the MCP server has no artificial limits. The only limits are your hardware (CPU cores, RAM) and your Ansys license count. Claude Code will happily run 100 simulations if you ask it to — so be specific about what you want.
+
+**Q: Can it run on a laptop?**
+A: Yes, for small-to-medium models. A laptop with 16GB RAM can handle meshes up to ~2-5 million cells for CFD or ~500k nodes for FEA. Student licenses work fine with this server.
 
 ## 🤝 Contributing
 

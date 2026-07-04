@@ -222,19 +222,55 @@ export ANSYS_PLATFORM_INSTANCEMANAGEMENT_CONFIG="/路径/到/配置"
 ## ❓ 常见问题
 
 **问：没有许可证能使用吗？**
-答：服务器可以运行，所有 24 个工具会返回指导和 API 示例。但实际启动求解器需要已授权的 Ansys 安装。
+答：服务器可以运行，所有工具会返回指导和 API 示例。但实际启动求解器需要已授权的 Ansys 安装。在有有效许可证的机器上，PyAnsys 会自动获取。
 
 **问：支持哪些 Ansys 版本？**
 答：PyAnsys 支持 2024 R1 及以上版本（版本号 241+）。本服务器默认使用 2025 R1 (251)，但接受任何版本。
 
 **问：能否在远程 HPC 集群上运行？**
-答：可以 — PyAnsys 支持连接到远程 Fluent/Mechanical 实例。通过 `ANSYS_PLATFORM_INSTANCEMANAGEMENT_CONFIG` (PyPIM) 配置。
+答：可以 — PyAnsys 支持连接到远程 Fluent/Mechanical 实例。通过 `ANSYS_PLATFORM_INSTANCEMANAGEMENT_CONFIG` (PyPIM) 配置。对于 Slurm 集群，使用 `ansys-mapdl-core` 配合 `launch_mapdl(start_instance=False)`。
 
 **问：这是 Ansys/Synopsys 的官方产品吗？**
 答：不是。这是一个独立的社区项目。Ansys 和 Fluent 是 Ansys Inc. / Synopsys 的商标。
 
 **问：Claude Code 能运行完整的参数化研究吗？**
 答：能。描述您需要的："运行10个案例，入口速度从1到10 m/s，收集压降数据，绘制图表" — Claude Code 会循环调用工具。
+
+**问：能使用现有的 .cas/.dat/.mechdb/.inp 文件吗？**
+答：能。使用 `ansys_run_simulation` 并将 `input_file` 参数指向您的文件。对于 CAD 几何体（.stp、.iges、.scdoc），先使用 `ansys_load_geometry`。
+
+**问：结果文件会自动保存吗？**
+答：是的。每次仿真后，结果文件会保存到输出目录：Fluent 写入 `.cas.h5` + `.dat.h5`，Mechanical 写入 `.rst`，MAPDL 写入 `.rst/.rth`。您也可以通过 `ansys_export_results` 手动导出为 CSV、VTK、HDF5 或 NPZ 格式。
+
+**问：可以获得哪些结果格式？**
+答：`ansys_export_results` 支持：**CSV**（Excel/Python 分析）、**VTK/VTU**（ParaView 可视化）、**HDF5**（机器学习的高效二进制格式）、**EnSight**（专业后处理器）、**NPZ**（NumPy 兼容）。外加自动生成的 Markdown/HTML/PDF 报告。
+
+**问：支持瞬态（时间相关）仿真吗？**
+答：支持。通过 `ansys_set_parameters` 设置时间步参数：`{"time": "transient", "time_step_size": 0.01, "num_time_steps": 100}`。然后使用 `ansys_get_field_data` 或 `ansys_export_results` 配合 `timesteps` 参数提取特定时间步的数据。
+
+**问：有哪些湍流模型可用？**
+答：通过 Fluent/MAPDL：k-epsilon（标准、RNG、realizable）、k-omega（标准、SST）、Spalart-Allmaras、Reynolds Stress、LES、DES。描述您的需求，Claude Code 会配置正确的模型。
+
+**问：能做多相流仿真吗？**
+答：能 — Fluent 支持 VOF、Eulerian、Mixture 和 DPM 模型。告诉 Claude Code："设置水-空气自由表面的 VOF 模型"，它将通过 `ansys_set_parameters` 配置。
+
+**问：支持 SolidWorks / Catia / NX / Fusion 360 的 CAD 几何体吗？**
+答：支持。将 CAD 导出为 `.stp` 或 `.iges`（标准交换格式），然后使用 `ansys_load_geometry`。所有主流 CAD 工具都支持 STEP/IGES 导出。
+
+**问：可以在 Windows 上使用，而 Ansys 在 Linux 上运行吗？**
+答：可以。MCP 服务器在 Claude Code 所在位置运行。如果 Ansys 在 Linux 工作站上，在那里安装服务器并让 Claude Code 连接到它。也可以使用 SSH 隧道。
+
+**问：如果仿真发散怎么办？**
+答：Claude Code 可以诊断并修复。如果收敛失败，`ansys_get_convergence` 会显示哪些方程有问题。然后 Claude Code 可以调整欠松弛因子、切换到一阶格式或细化网格——全部通过现有工具。
+
+**问：多个用户可以共享一个 Ansys 许可证吗？**
+答：服务器不管理许可证队列——这是 Ansys 许可证管理器的工作。如果许可证服务器有 N 个席位，最多 N 个仿真可以同时运行。超出限制时 PyAnsys 会返回许可证错误。
+
+**问：有速率限制或使用配额吗？**
+答：没有——MCP 服务器没有人为限制。唯一的限制是您的硬件（CPU 核心、RAM）和 Ansys 许可证数量。如果您要求 Claude Code 运行 100 个仿真，它会照做——所以请明确说明您想要什么。
+
+**问：可以在笔记本电脑上运行吗？**
+答：可以，适用于中小型模型。16GB RAM 的笔记本可以处理约 2-5 百万 CFD 单元或约 50 万 FEA 节点的网格。学生许可证与此服务器兼容。
 
 ## 🤝 贡献
 

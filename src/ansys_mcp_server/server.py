@@ -999,6 +999,17 @@ async def handle_run_simulation(solver: str, input_file: str, output_dir: str = 
                     )
                     lines.append("   ✅ Fluent simulation LAUNCHED successfully!")
                     lines.append("   Session active — use ansys_get_simulation_status to monitor")
+                    # Auto-save case+data after solve
+                    base = str(Path(input_file).stem)
+                    case_out = str(Path(output_dir) / f"{base}_result.cas.h5")
+                    data_out = str(Path(output_dir) / f"{base}_result.dat.h5")
+                    try:
+                        session.file.write_case(case_out)
+                        session.file.write_data(data_out)
+                        lines.append(f"   📁 Results saved: {case_out}")
+                        lines.append(f"   📁 Results saved: {data_out}")
+                    except Exception:
+                        lines.append(f"   💡 Results will be in: {output_dir}/")
                     return "\n".join(lines)
                 except Exception as e:
                     launch_error = str(e)
@@ -1024,6 +1035,24 @@ async def handle_run_simulation(solver: str, input_file: str, output_dir: str = 
                     output = session.input(input_file)
                     lines.append("   ✅ MAPDL simulation LAUNCHED successfully!")
                     lines.append("   Session active — use ansys_get_results_summary to see results")
+                    # Auto-save results
+                    base = str(Path(input_file).stem)
+                    rst_out = str(Path(output_dir) / f"{base}.rst")
+                    try:
+                        session.save(rst_out)
+                        lines.append(f"   📁 Results saved: {rst_out}")
+                    except Exception:
+                        pass
+                    try:
+                        session.run("""
+/POST1
+SET,LAST
+*GET,NODE_COUNT,NODE,0,COUNT
+*GET,ELEM_COUNT,ELEM,0,COUNT
+""")
+                        lines.append(f"   📊 Nodes: {session.parameters.get('NODE_COUNT','?')} | Elements: {session.parameters.get('ELEM_COUNT','?')}")
+                    except Exception:
+                        pass
                     lines.append("")
                     if output:
                         lines.append("   ── Solver output (first 20 lines) ──")
@@ -1053,6 +1082,13 @@ async def handle_run_simulation(solver: str, input_file: str, output_dir: str = 
                     session.run(input_file=input_file)
                     lines.append("   ✅ Mechanical simulation LAUNCHED successfully!")
                     lines.append("   Session active — use ansys_get_results_summary to see results")
+                    base = str(Path(input_file).stem)
+                    rst_out = str(Path(output_dir) / f"{base}.rst")
+                    try:
+                        session.run(f"SAVE,'{rst_out}'")
+                        lines.append(f"   📁 Results saved: {rst_out}")
+                    except Exception:
+                        lines.append(f"   💡 Results in: {output_dir}/")
                     return "\n".join(lines)
                 except Exception as e:
                     launch_error = str(e)
