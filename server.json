@@ -1,0 +1,44 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.vorobjewsen30-max/ansys-mcp-server",
+  "title": "Ansys MCP Server",
+  "description": "Give Claude Code CLI direct control over Ansys engineering simulations — CFD in Fluent, FEA in Mechanical, meshing, and post-processing. 26 tools. Persistent GUI mode with single-window real-time rendering.",
+  "version": "2.0.0",
+  "website": "https://github.com/vorobjewsen30-max/ansys-mcp-server",
+  "documentation": "https://github.com/vorobjewsen30-max/ansys-mcp-server/blob/main/README.md",
+  "license": "MIT",
+  "categories": [
+    "engineering",
+    "simulation",
+    "scientific-computing"
+  ],
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "ansys-mcp-server",
+      "version": "2.0.0",
+      "transport": {
+        "type": "stdio",
+        "command": "python",
+        "arguments": ["-m", "ansys_mcp_server.server"]
+      }
+    }
+  ],
+  "keywords": [
+    "ansys",
+    "fluent",
+    "cfd",
+    "fea",
+    "mechanical",
+    "mapdl",
+    "pyansys",
+    "engineering-simulation",
+    "computational-fluid-dynamics",
+    "finite-element-analysis",
+    "turbulence",
+    "mesh",
+    "post-processing",
+    "scientific-computing",
+    "hpc"
+  ]
+}
