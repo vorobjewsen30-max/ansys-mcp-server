@@ -123,6 +123,12 @@ class LiveAnsysSession:
                 elif self._solver == "mapdl":
                     self._pyansys_session.run("/STATUS")
                     return True
+                elif self._solver == "mechanical":
+                    # Try a harmless run() call — Mechanical uses Python scripting
+                    run_method = getattr(self._pyansys_session, "run", None)
+                    if run_method is not None:
+                        run_method("print('ping')")
+                        return True
             except Exception:
                 pass
 
@@ -469,6 +475,46 @@ class LiveAnsysSession:
                     self._command_count = 0
                     lines.append(f"   ✅ MAPDL launched via subprocess, PID: {self._pid}")
 
+
+        # ── Mechanical ─────────────────────────────────────────────────
+        elif solver == "mechanical":
+            try:
+                import ansys.mechanical.core as pymech
+                self._pymech = pymech
+
+                session = pymech.launch_mechanical()
+                self._pyansys_session = session
+                self._solver = "mechanical"
+                self._created_by_us = True
+                self._started_at = datetime.now()
+                self._command_count = 0
+
+                # Get PID
+                try:
+                    self._pid = session._process.pid
+                except Exception:
+                    pass
+
+                lines.append("   ✅ Mechanical GUI opened")
+                lines.append(f"   PID:         {self._pid or 'auto'}")
+                lines.append(f"   Window:      VISIBLE")
+
+            except Exception as e:
+                lines.append(f"   ⚠️ PyAnsys Mechanical launch failed: {e}")
+
+                ansys_bin = shutil.which("AnsysWBU") or shutil.which("mechanical")
+                if ansys_bin:
+                    self._process = subprocess.Popen(
+                        [ansys_bin],
+                        creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+                    )
+                    self._pid = self._process.pid
+                    self._solver = "mechanical"
+                    self._created_by_us = True
+                    self._started_at = datetime.now()
+                    self._command_count = 0
+                    lines.append(f"   ✅ Mechanical launched via subprocess, PID: {self._pid}")
+
         else:
             return f"❌ Unknown solver: {solver}"
 
@@ -539,7 +585,7 @@ class LiveAnsysSession:
         for i, (scheme_cmd, tui_cmd) in enumerate(pending):
             delivered = False
 
-            # ── Tier 1: execute_tui (cleanest — takes raw "/command args") ─
+            # ── Tier 1: Fluent — execute_tui (takes raw "/command args") ──
             if not delivered and self._pyansys_session is not None and self._solver == "fluent":
                 try:
                     exec_tui = getattr(self._pyansys_session, "execute_tui", None)
@@ -551,7 +597,7 @@ class LiveAnsysSession:
                 except Exception as e:
                     results.append(f"   [{i+1}] ⚠️ {tui_cmd[:100]} (execute_tui: {e!s})")
 
-            # ── Tier 2: scheme.exec (fallback — ti-menu-load-string wrapper) ─
+            # ── Tier 2a: Fluent — scheme.exec (fallback) ────────────────
             if not delivered and self._pyansys_session is not None and self._solver == "fluent":
                 try:
                     scheme = getattr(self._pyansys_session, "scheme", None)
@@ -562,6 +608,34 @@ class LiveAnsysSession:
                         delivery_method = "scheme_exec"
                 except Exception as e:
                     results.append(f"   [{i+1}] ⚠️ {tui_cmd[:100]} (scheme.exec: {e!s})")
+
+            # ── Tier 1b: MAPDL — session.run(APDL command) ─────────────
+            if not delivered and self._pyansys_session is not None and self._solver == "mapdl":
+                try:
+                    run_method = getattr(self._pyansys_session, "run", None)
+                    if run_method is not None:
+                        result = run_method(tui_cmd)
+                        results.append(f"   [{i+1}] ✅ {tui_cmd[:100]}")
+                        if result:
+                            results.append(f"        → {str(result)[:150]}")
+                        delivered = True
+                        delivery_method = "mapdl_run"
+                except Exception as e:
+                    results.append(f"   [{i+1}] ⚠️ {tui_cmd[:100]} (mapdl.run: {e!s})")
+
+            # ── Tier 1c: Mechanical — session.run(Python script) ───────
+            if not delivered and self._pyansys_session is not None and self._solver == "mechanical":
+                try:
+                    run_method = getattr(self._pyansys_session, "run", None)
+                    if run_method is not None:
+                        result = run_method(tui_cmd)
+                        results.append(f"   [{i+1}] ✅ {tui_cmd[:100]}")
+                        if result:
+                            results.append(f"        → {str(result)[:150]}")
+                        delivered = True
+                        delivery_method = "mechanical_run"
+                except Exception as e:
+                    results.append(f"   [{i+1}] ⚠️ {tui_cmd[:100]} (mechanical.run: {e!s})")
 
             if not delivered:
                 results.append(f"   [{i+1}] 📝 {tui_cmd[:100]} → queued to journal")
@@ -799,14 +873,14 @@ TOOLS = [
     # ── Session Management (NEW — core of the persistent window approach) ──
     Tool(
         name="ansys_open_gui",
-        description="Open Ansys Fluent GUI window. Opens ONCE — all subsequent commands render in this same window. If already open, returns status WITHOUT creating a new window. NO DUPLICATE WINDOWS.",
+        description="Open Ansys GUI window (Fluent / MAPDL / Mechanical). Opens ONCE — all subsequent commands render in this same window. If already open, returns status WITHOUT creating a new window. NO DUPLICATE WINDOWS.",
         inputSchema={
             "type": "object",
             "properties": {
                 "solver": {
                     "type": "string",
-                    "enum": ["fluent", "mapdl"],
-                    "description": "Which solver to open (default: fluent)",
+                    "enum": ["fluent", "mapdl", "mechanical"],
+                    "description": "Which solver to open (default: fluent). 'fluent' = CFD, 'mapdl' = APDL, 'mechanical' = FEA",
                 },
                 "product_version": {
                     "type": "string",
@@ -840,13 +914,13 @@ TOOLS = [
     ),
     Tool(
         name="ansys_connect",
-        description="Connect to an already-running Ansys window (opened manually by user). Scans processes via psutil and attaches to the found Fluent/MAPDL window. All subsequent commands go to THAT window.",
+        description="Connect to an already-running Ansys window (opened manually by user). Scans processes via psutil and attaches to the found Fluent / MAPDL / Mechanical window. All subsequent commands go to THAT window.",
         inputSchema={
             "type": "object",
             "properties": {
                 "solver": {
                     "type": "string",
-                    "enum": ["fluent", "mapdl"],
+                    "enum": ["fluent", "mapdl", "mechanical"],
                     "description": "Which solver to look for (default: fluent)",
                 },
                 "pid": {
@@ -1247,7 +1321,7 @@ TOOLS = [
 
 async def handle_open_gui(solver: str = "fluent", product_version: str = "251",
                            num_processors: int = None) -> str:
-    """Launch Fluent GUI — once. If already open, returns status without new window."""
+    """Launch Ansys GUI (Fluent / MAPDL / Mechanical) — once. If already open, returns status without new window."""
     return live_session.start(
         solver=solver,
         product_version=product_version,
