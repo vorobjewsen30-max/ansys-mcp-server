@@ -13,9 +13,11 @@
 
 **Give Claude Code CLI direct control over Ansys engineering simulations.**
 
-This MCP (Model Context Protocol) server wraps PyAnsys into 24 tools that Claude Code can call — run CFD in Fluent, crush FEA in Mechanical, drive MAPDL, post-process with DPF, and mesh with Prime. No more clicking through Workbench. Just describe what you want in plain language.
+This MCP (Model Context Protocol) server wraps PyAnsys into **30 tools** that Claude Code can call — run CFD in Fluent, crush FEA in Mechanical, drive MAPDL, post-process with DPF, and mesh with Prime. The AI understands the **full simulation pipeline** across products: load geometry → mesh → set materials → apply BCs → solve → post-process → export. It knows which tool to call next, and it can reason across CFD, FEA, thermal, and FSI workflows.
 
-> 🎯 **What makes this different:** It's not a chatbot wrapper. It's not a documentation scraper. It gives Claude Code real, programmatic access to the Ansys solver process — the same API that PyAnsys uses internally. On a machine with Ansys installed and licensed, it *actually launches and controls the solvers*.
+No more clicking through Workbench. Just describe what you want in plain language.
+
+> 🎯 **What makes this different:** It's not a chatbot wrapper, not a documentation scraper. It gives Claude Code real, programmatic access to the Ansys solver process — the same API that PyAnsys uses internally. On a machine with Ansys installed and licensed, it *actually launches and controls the solvers*. The solver window stays open — you watch mesh generation, convergence plots, and field data render **in real time**.
 
 ## 🎬 Quick Demo
 
@@ -23,18 +25,21 @@ This MCP (Model Context Protocol) server wraps PyAnsys into 24 tools that Claude
 User: "Simulate water flow in a 10cm pipe, 2m long, inlet velocity 5 m/s, steel walls, 300K"
 
 Claude Code (via Ansys MCP):
-  1. ansys_examples("pipe_flow")           ← finds the right setup pattern
-  2. ansys_mesh_generate(pipe.stp, ...)    ← generates 500k-cell mesh
-  3. ansys_set_material(water, steel)      ← assigns materials
-  4. ansys_set_boundary_conditions(...)    ← velocity-inlet, pressure-outlet
-  5. ansys_set_parameters(k-epsilon, ...)  ← configures turbulence model
-  6. ansys_run_simulation(...)             ← launches Fluent with license
-  7. ansys_get_convergence()               ← monitors residuals
-  8. ansys_get_field_data("velocity")      ← extracts velocity field
-  9. ansys_export_results(VTK)             ← exports for ParaView
+  1. ansys_list_workflows("cfd")            ← understands which workflow to use
+  2. ansys_open_gui(solver="fluent")        ← opens Fluent GUI (one persistent window)
+  3. ansys_load_geometry("pipe.stp")        ← loads CAD → visible in Fluent window
+  4. ansys_mesh_generate(element_size=0.5)  ← mesh builds in real-time on screen
+  5. ansys_set_material("fluid", "water")   ← material colors update in GUI
+  6. ansys_set_material("solid", "steel")
+  7. ansys_set_boundary_conditions(...)     ← inlets, outlets highlighted on mesh
+  8. ansys_set_parameters({"viscous_model": "k-epsilon"})
+  9. ansys_run_simulation(iterations=500)   ← convergence plot updates live
+  10. ansys_get_convergence()               ← residual history
+  11. ansys_get_field_data("velocity")      ← probe points
+  12. ansys_export_results(...)             ← CSV/VTK for ParaView
 ```
 
-All from *one sentence*. No scripting, no TUI commands, no Workbench clicking.
+All from *one sentence*. No scripting, no TUI commands, no Workbench clicking. The AI knows the sequence.
 
 ## 🚀 Installation (2 minutes)
 
@@ -58,8 +63,18 @@ cd ansys-mcp-server
 The installer:
 1. Creates a `.venv` virtual environment
 2. Installs `mcp` SDK
-3. Optionally installs PyAnsys packages (`install.sh install-all` for everything)
+3. Optionally installs PyAnsys packages (`./install.sh install-all` for everything)
 4. Writes Claude Code config to `~/.claude/settings.json`
+
+**Non-fatal errors:** If PyAnsys packages fail to install (no internet, missing build tools, etc.), the installer continues with a warning. The server works without them — you can install `pip install ansys-fluent-core` later.
+
+### Upgrade without touching Claude config
+
+```bash
+# Pull latest code + upgrade packages, keep ~/.claude/settings.json intact
+./install.sh --upgrade
+install.bat --upgrade       # Windows
+```
 
 ### Option 2: Manual
 
@@ -77,7 +92,6 @@ pip install ansys-dpf-core           # Post-processing
 pip install ansys-meshing-prime      # Meshing
 
 # 4. Configure Claude Code CLI (~/.claude/settings.json)
-# Add this to ~/.claude/settings.json:
 ```
 
 ```json
@@ -105,52 +119,84 @@ pip install git+https://github.com/vorobjewsen30-max/ansys-mcp-server.git
 # "command": "ansys-mcp-server"
 ```
 
-## 🧰 Tools (24 total)
+## 🧰 Tools (30 total)
 
-### 🚀 Simulation Management
+### 🚀 Simulation Management (NEW — persistent GUI)
 | Tool | What it does |
 |------|-------------|
+| `ansys_open_gui` | Launch Ansys Fluent GUI **once**. All subsequent commands render in this same window. Watch mesh, convergence, and results in real-time. |
+| `ansys_session_status` | Show current session: PID, solver, uptime, commands sent |
+| `ansys_close_session` | Close the Ansys window and end the session |
+| `ansys_connect` | Attach to an already-running Ansys window (auto-detected via psutil) |
+| `ansys_send_commands` | Send raw TUI/Scheme commands to the active Fluent window |
 | `ansys_list_packages` | Check which PyAnsys packages are installed |
-| `ansys_run_simulation` | Launch a simulation (Fluent / Mechanical / MAPDL) |
-| `ansys_get_simulation_status` | Get status of a running simulation |
-| `ansys_stop_simulation` | Stop a simulation gracefully |
-| `ansys_watch_simulation` | Monitor convergence live |
 
 ### 🔧 Mesh Operations
 | Tool | What it does |
 |------|-------------|
-| `ansys_mesh_info` | Get mesh statistics (nodes, elements, quality) |
-| `ansys_mesh_generate` | Generate mesh from geometry (STP, IGES, SCDOC) |
-| `ansys_mesh_refine` | Refine mesh globally or by region |
-| `ansys_mesh_quality` | Run quality diagnostics (skewness, aspect ratio, etc.) |
-| `ansys_mesh_convert` | Convert between mesh formats (MSH ↔ CDB ↔ VTU) |
-
-### 📊 Results Processing
-| Tool | What it does |
-|------|-------------|
-| `ansys_get_results_summary` | List all available result fields |
-| `ansys_get_field_data` | Extract field data at probe points (stress, velocity, temp…) |
-| `ansys_export_results` | Export to CSV / VTK / HDF5 / NPZ |
-| `ansys_get_convergence` | Get convergence history (residuals) |
-| `ansys_create_report` | Auto-generate simulation report (MD/HTML/PDF) |
+| `ansys_mesh_info` | Get mesh statistics (nodes, elements, quality) from the active window |
+| `ansys_mesh_generate` | Generate mesh from loaded geometry. **Step 2** in the pipeline. Mesh renders in real-time. |
+| `ansys_mesh_refine` | Refine mesh globally, by boundary, or by region |
+| `ansys_mesh_quality` | Run quality diagnostics (skewness, aspect ratio, orthogonal quality) |
 
 ### ⚙️ Model Configuration
 | Tool | What it does |
 |------|-------------|
-| `ansys_set_parameters` | Set solver settings, models, numerics |
+| `ansys_set_parameters` | Set solver settings, models, turbulence schemes |
 | `ansys_get_parameters` | Read current simulation parameters |
-| `ansys_set_boundary_conditions` | Create/modify BCs (inlet, outlet, wall, force…) |
+| `ansys_set_boundary_conditions` | Create/modify BCs (velocity-inlet, pressure-outlet, wall, symmetry, etc.) |
 | `ansys_list_boundary_conditions` | List all BCs in the model |
 | `ansys_set_material` | Assign materials from library or custom properties |
 | `ansys_list_materials` | Browse Ansys material library |
 
+### 🚀 Run & Monitor
+| Tool | What it does |
+|------|-------------|
+| `ansys_run_simulation` | Start calculation **in the active window**. Convergence plot updates iteration by iteration. |
+| `ansys_get_convergence` | Get residual history (live) |
+| `ansys_stop_simulation` | Stop a running calculation |
+
+### 📊 Results Processing
+| Tool | What it does |
+|------|-------------|
+| `ansys_get_results_summary` | List all available result fields in the active window |
+| `ansys_get_field_data` | Extract field data at probe points (velocity, pressure, temperature, stress...) |
+| `ansys_export_results` | Export to CSV / VTK / HDF5 / NPZ |
+| `ansys_create_report` | Auto-generate simulation report (MD/HTML/PDF) |
+
+### 🔄 Cross-Product Workflow (NEW)
+| Tool | What it does |
+|------|-------------|
+| `ansys_list_workflows` | **Use this first.** Lists full simulation pipelines: CFD, FEA, Thermal, FSI. Tells you exactly which tools to call in which order. |
+| `ansys_transfer_mesh` | Transfer mesh between Ansys products: Prime → Fluent, Fluent → Mechanical, MAPDL → DPF, etc. |
+
 ### 📖 Help & Documentation
 | Tool | What it does |
 |------|-------------|
-| `ansys_get_documentation` | Search Ansys docs (k-epsilon, mesh quality, convergence…) |
-| `ansys_list_solvers` | Catalog of available solvers and physics |
+| `ansys_get_documentation` | Search Ansys documentation |
+| `ansys_list_solvers` | Catalog of solvers with **pipeline awareness** — shows what to do before and after each solver |
 | `ansys_validate_setup` | Check setup for common errors before running |
-| `ansys_examples` | Get complete worked examples (pipe flow, wing aero, etc.) |
+| `ansys_examples` | Get complete worked examples (pipe flow, heat exchanger, wing aero, structural) |
+
+## 🔄 Workflow-aware AI
+
+The LLM doesn't just call random tools — it **understands the engineering pipeline**.
+
+When you say *"Run a CFD analysis on this pipe"*, the AI knows:
+
+1. **First:** load geometry (`ansys_load_geometry` — "FIRST STEP")
+2. **Then:** generate mesh (`ansys_mesh_generate` — "SECOND STEP")
+3. **Then:** materials, BCs, solver settings
+4. **Then:** solve, monitor convergence
+5. **Finally:** export results
+
+When you say *"Fluid-structure interaction on a valve"*, the AI knows:
+- CFD in Fluent → export pressures → FEA in Mechanical → map results back
+- It calls `ansys_list_workflows("fsi")` to get the full pipeline step-by-step
+
+When you say *"How do I set up a thermal analysis?"*, the AI calls `ansys_list_workflows("thermal")` and shows you the pipeline.
+
+The tool descriptions are written with **pipeline context** — every tool knows what comes before and after it.
 
 ## 📦 Supported Ansys Products
 
@@ -166,8 +212,7 @@ Install what you need:
 ```bash
 pip install ansys-fluent-core        # Fluent only
 pip install ansys-mapdl-core         # MAPDL only
-# ... or install multiple
-pip install ansys-fluent-core ansys-dpf-core ansys-meshing-prime
+pip install ansys-fluent-core ansys-dpf-core ansys-meshing-prime  # Multiple
 ```
 
 ## 🔐 License
@@ -188,39 +233,58 @@ If `fluent` or `mapdl` work from your terminal, the MCP server will work too.
 ## 🏗️ Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  Claude Code CLI                                     │
-│  "Simulate pipe flow at Re=10000..."                 │
-└──────────────┬───────────────────────────────────────┘
-               │ stdio (JSON-RPC via MCP protocol)
-┌──────────────▼───────────────────────────────────────┐
-│  ansys-mcp-server (Python)                           │
-│  ┌────────────────────────────────────────────────┐  │
-│  │ 24 MCP Tools (Fluent, Mechanical, MAPDL, DPF)  │  │
-│  └──────────────────┬─────────────────────────────┘  │
-│                     │ Python API calls                │
-│  ┌──────────────────▼─────────────────────────────┐  │
-│  │ AnsysClient (lazy-loading PyAnsys wrapper)     │  │
-│  └──────────────────┬─────────────────────────────┘  │
-└─────────────────────┼────────────────────────────────┘
-                      │
-          ┌───────────┴───────────┐
-          │      PyAnsys          │
-          │  (fluent / mapdl /    │
-          │   mechanical / dpf)   │
-          └───────────┬───────────┘
-                      │
-          ┌───────────▼───────────┐
-          │   Ansys License Mgr   │
-          │   (ANSYSLI_SERVER)    │
-          └───────────┬───────────┘
-                      │
-          ┌───────────▼───────────┐
-          │  Ansys Solver Process │
-          │  (fluent / mapdl /    │
-          │   mechanical)         │
-          └───────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│  Claude Code CLI                                              │
+│  "Simulate pipe flow, then transfer to FEA for stress"        │
+└──────────────────────┬────────────────────────────────────────┘
+                       │ stdio (JSON-RPC via MCP protocol)
+┌──────────────────────▼────────────────────────────────────────┐
+│  ansys-mcp-server (Python)                                    │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ 30 MCP Tools + Workflow Awareness                        │  │
+│  │ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐ │  │
+│  │ │ Session │ │  Mesh    │ │  Solve   │ │  Workflow    │ │  │
+│  │ │  Mgmt   │ │  Ops     │ │  & Post  │ │  Pipeline    │ │  │
+│  │ └─────────┘ └──────────┘ └──────────┘ └──────────────┘ │  │
+│  │                      │                                   │  │
+│  │      execute_tui() / scheme.exec() / journal fallback    │  │
+│  └──────────────────────┬────────────────────────────────────┘  │
+│                          │ 3-tier delivery                       │
+│  ┌──────────────────────▼────────────────────────────────────┐  │
+│  │               LiveAnsysSession (singleton)                │  │
+│  │  One persistent Fluent window — never duplicated          │  │
+│  │  PID: 12345 | Commands: 47 | Uptime: 12 min              │  │
+│  └──────────────────────┬────────────────────────────────────┘  │
+└─────────────────────────┼──────────────────────────────────────┘
+                          │
+              ┌───────────┴───────────┐
+              │      PyAnsys          │
+              │  (fluent / mapdl /    │
+              │   mechanical / dpf)   │
+              └───────────┬───────────┘
+                          │
+              ┌───────────▼───────────┐
+              │   Ansys License Mgr   │
+              │   (ANSYSLI_SERVER)    │
+              └───────────┬───────────┘
+                          │
+              ┌───────────▼───────────┐
+              │  Ansys Solver Process │
+              │  (fluent / mapdl /    │
+              │   mechanical)         │
+              │  ┌─────────────────┐  │
+              │  │ GUI Window      │  │
+              │  │ • Mesh renders  │  │
+              │  │ • Convergence   │  │
+              │  │ • Field data    │  │
+              │  └─────────────────┘  │
+              └───────────────────────┘
 ```
+
+**Delivery tiers** (per command):
+1. `session.execute_tui()` — direct TUI command via gRPC (preferred)
+2. `session.scheme.exec()` — Scheme evaluation (fallback)
+3. Journal file + auto-load (last resort)
 
 ## ❓ FAQ
 
@@ -236,6 +300,9 @@ A: Yes — PyAnsys supports connecting to remote Fluent/Mechanical instances. Co
 **Q: Is this affiliated with Ansys/Synopsys?**
 A: No. This is an independent community project. Ansys and Fluent are trademarks of Ansys Inc. / Synopsys.
 
+**Q: Does the AI understand multiphysics workflows?**
+A: Yes. The server includes `ansys_list_workflows` which describes the full pipeline for CFD, FEA, thermal, and FSI. The LLM understands which product handles what, and in which order to call tools. For example, FSI = Fluent (fluid) → Mechanical (structure) with mesh transfer in between.
+
 **Q: Can Claude Code run a full parametric study?**
 A: Yes. Describe it: *"Run 10 cases varying inlet velocity from 1 to 10 m/s, collect pressure drop, make a plot"* — Claude Code calls the tools in a loop automatically.
 
@@ -246,40 +313,28 @@ A: Yes. Use `ansys_run_simulation` with the `input_file` parameter pointing to y
 A: Yes. After each simulation, result files are saved to the output directory: Fluent writes `.cas.h5` + `.dat.h5`, Mechanical writes `.rst`, MAPDL writes `.rst/.rth`. You can also manually export with `ansys_export_results` in CSV, VTK, HDF5, or NPZ format.
 
 **Q: What result formats can I get?**
-A: `ansys_export_results` supports: **CSV** (Excel/Python analysis), **VTK/VTU** (ParaView visualization), **HDF5** (efficient binary for ML pipelines), **EnSight** (professional post-processor), **NPZ** (NumPy-compatible). Plus auto-generated reports in Markdown/HTML/PDF.
+A: `ansys_export_results` supports: **CSV** (Excel/Python analysis), **VTK/VTU** (ParaView visualization), **HDF5** (efficient binary for ML pipelines), **NPZ** (NumPy-compatible). Plus auto-generated reports in Markdown/HTML/PDF.
 
-**Q: Can it handle transient (time-dependent) simulations?**
-A: Yes. Set time-stepping parameters via `ansys_set_parameters` with `{"time": "transient", "time_step_size": 0.01, "num_time_steps": 100}`. Then use `ansys_get_field_data` or `ansys_export_results` with the `timesteps` parameter to extract data at specific time steps.
+**Q: Can it handle transient simulations?**
+A: Yes. Set time-stepping via `ansys_set_parameters` with `{"time": "transient", "time_step_size": 0.01, "num_time_steps": 100}`.
 
 **Q: What turbulence models are available?**
 A: Through Fluent/MAPDL: k-epsilon (standard, RNG, realizable), k-omega (standard, SST), Spalart-Allmaras, Reynolds Stress, LES, DES. Describe what you need and Claude Code will configure the right one.
 
-**Q: Can it do multiphase simulations?**
-A: Yes — Fluent supports VOF, Eulerian, Mixture, and DPM models. Tell Claude Code: *"set up a VOF model for water-air free surface"* and it will configure the appropriate settings via `ansys_set_parameters`.
+**Q: Can it do multiphase?**
+A: Yes — VOF, Eulerian, Mixture, DPM. Tell Claude Code: *"set up a VOF model for water-air free surface"*.
 
-**Q: Does it support CAD geometry from SolidWorks / Catia / NX / Fusion 360?**
-A: Yes. Export your CAD as `.stp` or `.iges` (standard exchange formats), then use `ansys_load_geometry`. All major CAD tools support STEP/IGES export.
-
-**Q: Can I use it on Windows while Ansys is running on Linux?**
-A: Yes. The MCP server runs wherever Claude Code runs. If your Ansys is on a Linux workstation, install the MCP server there and run Claude Code (or Claude Desktop) connecting to that server. You can also use SSH tunneling.
+**Q: Can I use it on Windows while Ansys runs on Linux?**
+A: Yes. The MCP server runs wherever Claude Code runs. If Ansys is on a Linux workstation, install the server there and connect Claude Code to it.
 
 **Q: What if the simulation diverges?**
-A: Claude Code can diagnose and fix it. If convergence fails, `ansys_get_convergence` shows which equations are problematic. Claude Code can then adjust under-relaxation factors, switch to first-order schemes, or refine the mesh — all through the existing tools.
+A: Claude Code can diagnose and fix it. `ansys_get_convergence` shows which equations are problematic. Claude Code adjusts under-relaxation, switches to first-order, or refines the mesh.
 
-**Q: Can multiple users share one Ansys license?**
-A: The server doesn't manage license queuing — that's what the Ansys license manager does. If your license server has N seats, up to N simulations can run simultaneously. Exceeding that, PyAnsys will return a license error.
+**Q: After rebooting, do I need to restart the MCP server?**
+A: No. If configured via `settings.json` (which `install.sh` does automatically), Claude Code CLI starts the MCP server on launch.
 
-**Q: Is there rate limiting or usage quotas?**
-A: No — the MCP server has no artificial limits. The only limits are your hardware (CPU cores, RAM) and your Ansys license count. Claude Code will happily run 100 simulations if you ask it to — so be specific about what you want.
-
-**Q: Can it run on a laptop?**
-A: Yes, for small-to-medium models. A laptop with 16GB RAM can handle meshes up to ~2-5 million cells for CFD or ~500k nodes for FEA. Student licenses work fine with this server.
-
-**Q: After rebooting my PC, do I need to restart the MCP server manually?**
-A: No. If you configured it via `settings.json` (which `install.sh` does automatically), Claude Code CLI starts the MCP server on launch. Just open Claude Code and it works. To test manually: `./install.sh run` (or `source .venv/bin/activate && cd src && python -m ansys_mcp_server.server`).
-
-**Q: How do I check if the server is running?**
-A: In Claude Code, ask: *"What Ansys packages are installed?"* — if it responds, the server is alive. You can also check the terminal for any Python process running `ansys_mcp_server.server`. If there's an issue, verify the path in `~/.claude/settings.json` points to the correct `.venv/bin/python`.
+**Q: Is there a `--upgrade` flag?**
+A: Yes. `./install.sh --upgrade` or `install.bat --upgrade` pulls the latest code and upgrades packages without touching `~/.claude/settings.json`.
 
 ## 🤝 Contributing
 

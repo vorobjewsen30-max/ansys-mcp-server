@@ -1,7 +1,7 @@
 # Ansys MCP Server
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)(https://opensource.org/licenses/MIT)
 [![MCP](https://img.shields.io/badge/MCP-2025.06.18-green.svg)](https://modelcontextprotocol.io/)
 
 🌐 **语言:** &nbsp; [EN](README.md) &nbsp;|&nbsp; [РУС](README.ru.md) &nbsp;|&nbsp; **中文**
@@ -10,9 +10,9 @@
 
 **让 Claude Code CLI 直接控制 Ansys 工程仿真。**
 
-此 MCP（模型上下文协议）服务器将 PyAnsys 封装为 24 个工具，Claude Code 可以调用这些工具——在 Fluent 中运行 CFD、在 Mechanical 中进行 FEA、驱动 MAPDL、使用 DPF 进行后处理、使用 Prime 进行网格划分。无需再在 Workbench 中点击。只需用自然语言描述您的需求。
+此 MCP（模型上下文协议）服务器将 PyAnsys 封装为 **30 个工具**，Claude Code 可以调用这些工具——在 Fluent 中运行 CFD、在 Mechanical 中进行 FEA、驱动 MAPDL、使用 DPF 进行后处理、使用 Prime 进行网格划分。AI 理解**完整的仿真流程**，从几何到导出，并自行决定下一步调用哪个工具。
 
-> 🎯 **有何不同：** 这不是聊天机器人包装器，也不是文档爬虫。它让 Claude Code 真正以编程方式访问 Ansys 求解器进程——与 PyAnsys 内部使用的 API 相同。在安装了 Ansys 并拥有许可证的机器上，它**实际上启动并控制求解器**。
+> 🎯 **有何不同：** 这不是聊天机器人包装器，也不是文档爬虫。它让 Claude Code 真正以编程方式访问 Ansys 求解器进程——与 PyAnsys 内部使用的 API 相同。在安装了 Ansys 并拥有许可证的机器上，它**实际启动并控制求解器**。求解器窗口保持打开——您可以**实时**观看网格生成、收敛曲线和场数据渲染。
 
 ## 🎬 快速演示
 
@@ -20,18 +20,21 @@
 用户："模拟10cm管道中的水流，长2m，入口速度5m/s，钢制管壁，300K"
 
 Claude Code（通过 Ansys MCP）：
-  1. ansys_examples("pipe_flow")           ← 找到正确的设置模板
-  2. ansys_mesh_generate(管道.stp, ...)    ← 生成50万单元网格
-  3. ansys_set_material(水, 钢)            ← 分配材料
-  4. ansys_set_boundary_conditions(...)    ← 速度入口、压力出口
-  5. ansys_set_parameters(k-epsilon, ...)  ← 配置湍流模型
-  6. ansys_run_simulation(...)             ← 使用许可证启动 Fluent
-  7. ansys_get_convergence()               ← 监控残差
-  8. ansys_get_field_data("velocity")      ← 提取速度场
-  9. ansys_export_results(VTK)             ← 导出到 ParaView
+  1. ansys_list_workflows("cfd")              ← 确定使用哪个 workflow
+  2. ansys_open_gui(solver="fluent")          ← 打开 Fluent GUI（单窗口）
+  3. ansys_load_geometry("管道.stp")           ← 加载 CAD → 窗口中可见
+  4. ansys_mesh_generate(element_size=0.5)     ← 网格实时构建
+  5. ansys_set_material("fluid", "water")      ← 材料颜色在 GUI 中更新
+  6. ansys_set_material("solid", "steel")
+  7. ansys_set_boundary_conditions(...)        ← 边界条件在网格上高亮
+  8. ansys_set_parameters({"viscous_model": "k-epsilon"})
+  9. ansys_run_simulation(iterations=500)      ← 收敛曲线实时更新
+  10. ansys_get_convergence()                  ← 残差历史
+  11. ansys_get_field_data("velocity")         ← 探针点
+  12. ansys_export_results(...)                ← CSV/VTK 导出到 ParaView
 ```
 
-只需**一句话**。无需脚本、TUI 命令或 Workbench 点击。
+只需**一句话**。无需脚本、TUI 命令或 Workbench 点击。AI 知道执行顺序。
 
 ## 🚀 安装（2 分钟）
 
@@ -58,6 +61,16 @@ cd ansys-mcp-server
 3. 可选安装 PyAnsys（`./install.sh install-all` 安装全部）
 4. 将配置写入 `~/.claude/settings.json`
 
+**错误非致命：** 如果 PyAnsys 包安装失败（无网络、缺少构建工具等），安装将继续进行并给出警告。服务器可以在没有它们的情况下工作——稍后可以运行 `pip install ansys-fluent-core`。
+
+### 升级而不修改 Claude 配置
+
+```bash
+# 拉取最新代码 + 升级包，保留 ~/.claude/settings.json
+./install.sh --upgrade
+install.bat --upgrade       # Windows
+```
+
 ### 方式 2：手动安装
 
 ```bash
@@ -74,7 +87,6 @@ pip install ansys-dpf-core           # 后处理
 pip install ansys-meshing-prime      # 网格划分
 
 # 4. 配置 Claude Code CLI (~/.claude/settings.json)
-# 将以下内容添加到 ~/.claude/settings.json：
 ```
 
 ```json
@@ -102,52 +114,80 @@ pip install git+https://github.com/vorobjewsen30-max/ansys-mcp-server.git
 # "command": "ansys-mcp-server"
 ```
 
-## 🧰 工具（共 24 个）
+## 🧰 工具（共 30 个）
 
-### 🚀 仿真管理
+### 🚀 会话管理（新增 — 持久窗口）
 | 工具 | 功能 |
 |------|------|
+| `ansys_open_gui` | 打开 Fluent GUI **一次**。所有命令都发往同一窗口。实时观看网格、收敛曲线和结果。 |
+| `ansys_session_status` | 当前会话状态：PID、求解器、运行时间、发送命令数 |
+| `ansys_close_session` | 关闭 Ansys 窗口 |
+| `ansys_connect` | 连接到已在运行的 Ansys 窗口（通过 psutil 自动检测） |
+| `ansys_send_commands` | 向活动 Fluent 窗口发送原始 TUI/Scheme 命令 |
 | `ansys_list_packages` | 检查已安装的 PyAnsys 包 |
-| `ansys_run_simulation` | 启动仿真（Fluent / Mechanical / MAPDL） |
-| `ansys_get_simulation_status` | 获取运行中仿真的状态 |
-| `ansys_stop_simulation` | 优雅地停止仿真 |
-| `ansys_watch_simulation` | 实时监控收敛情况 |
 
 ### 🔧 网格操作
 | 工具 | 功能 |
 |------|------|
-| `ansys_mesh_info` | 获取网格统计信息（节点数、单元数、质量） |
-| `ansys_mesh_generate` | 从几何体生成网格（STP、IGES、SCDOC） |
-| `ansys_mesh_refine` | 全局或按区域细化网格 |
-| `ansys_mesh_quality` | 运行质量诊断（偏斜度、纵横比等） |
-| `ansys_mesh_convert` | 网格格式转换（MSH ↔ CDB ↔ VTU） |
+| `ansys_mesh_info` | 从活动窗口获取网格统计信息（节点数、单元数、质量） |
+| `ansys_mesh_generate` | 从加载的几何体生成网格。**流程第 2 步。** 网格实时渲染。 |
+| `ansys_mesh_refine` | 全局、按边界或按区域细化网格 |
+| `ansys_mesh_quality` | 质量诊断（偏斜度、纵横比、正交质量） |
+
+### ⚙️ 模型配置
+| 工具 | 功能 |
+|------|------|
+| `ansys_set_parameters` | 设置求解器参数、模型、湍流方案 |
+| `ansys_get_parameters` | 读取当前仿真参数 |
+| `ansys_set_boundary_conditions` | 创建/修改边界条件（速度入口、压力出口、壁面等） |
+| `ansys_list_boundary_conditions` | 列出模型中的所有边界条件 |
+| `ansys_set_material` | 从材料库分配材料 |
+| `ansys_list_materials` | 浏览 Ansys 材料库 |
+
+### 🚀 运行与监控
+| 工具 | 功能 |
+|------|------|
+| `ansys_run_simulation` | **在活动窗口中**开始计算。收敛曲线逐迭代更新。 |
+| `ansys_get_convergence` | 获取残差历史（实时） |
+| `ansys_stop_simulation` | 停止正在运行的计算 |
 
 ### 📊 结果处理
 | 工具 | 功能 |
 |------|------|
 | `ansys_get_results_summary` | 列出所有可用的结果字段 |
-| `ansys_get_field_data` | 在探测点提取场数据（应力、速度、温度…） |
+| `ansys_get_field_data` | 在探针点提取场数据（速度、压力、温度、应力...） |
 | `ansys_export_results` | 导出为 CSV / VTK / HDF5 / NPZ |
-| `ansys_get_convergence` | 获取收敛历史（残差） |
 | `ansys_create_report` | 自动生成仿真报告（MD/HTML/PDF） |
 
-### ⚙️ 模型配置
+### 🔄 跨产品工作流（新增）
 | 工具 | 功能 |
 |------|------|
-| `ansys_set_parameters` | 设置求解器参数、模型、数值方案 |
-| `ansys_get_parameters` | 读取当前仿真参数 |
-| `ansys_set_boundary_conditions` | 创建/修改边界条件 |
-| `ansys_list_boundary_conditions` | 列出模型中的所有边界条件 |
-| `ansys_set_material` | 从材料库或自定义属性分配材料 |
-| `ansys_list_materials` | 浏览 Ansys 材料库 |
+| `ansys_list_workflows` | **首先使用这个。** 列出完整仿真流程：CFD、FEA、Thermal、FSI。告诉您以什么顺序调用哪些工具。 |
+| `ansys_transfer_mesh` | 在 Ansys 产品间传递网格：Prime → Fluent、Fluent → Mechanical、MAPDL → DPF 等。 |
 
 ### 📖 帮助与文档
 | 工具 | 功能 |
 |------|------|
 | `ansys_get_documentation` | 搜索 Ansys 文档 |
-| `ansys_list_solvers` | 可用求解器及其物理领域目录 |
-| `ansys_validate_setup` | 在运行前检查设置中的常见错误 |
-| `ansys_examples` | 获取完整示例（管道流、机翼气动、换热器等） |
+| `ansys_list_solvers` | 求解器目录，**含流程意识**——显示每个求解器前后应做什么 |
+| `ansys_validate_setup` | 运行前检查设置中的常见错误 |
+| `ansys_examples` | 获取完整示例（管道流、换热器、机翼气动、结构分析） |
+
+## 🔄 AI 理解工作流程
+
+当您说"对这个管道进行 CFD 分析"时，AI 知道：
+
+1. **首先：** 加载几何体（`ansys_load_geometry` — "第一步"）
+2. **然后：** 生成网格（`ansys_mesh_generate` — "第二步"）
+3. **然后：** 材料、边界条件、求解器设置
+4. **然后：** 求解、监控收敛
+5. **最后：** 导出结果
+
+当您说"阀门的流固耦合"时，AI 知道：
+- Fluent 中的 CFD → 导出压力 → Mechanical 中的 FEA → 映射结果返回
+- 它会调用 `ansys_list_workflows("fsi")` 获取完整的分步说明
+
+当您问"如何设置热分析？"时，AI 会调用 `ansys_list_workflows("thermal")` 并显示流程。
 
 ## 📦 支持的 Ansys 产品
 
@@ -163,7 +203,6 @@ pip install git+https://github.com/vorobjewsen30-max/ansys-mcp-server.git
 ```bash
 pip install ansys-fluent-core        # 仅 Fluent
 pip install ansys-mapdl-core         # 仅 MAPDL
-# ... 或安装多个
 pip install ansys-fluent-core ansys-dpf-core ansys-meshing-prime
 ```
 
@@ -185,98 +224,84 @@ export ANSYS_PLATFORM_INSTANCEMANAGEMENT_CONFIG="/路径/到/配置"
 ## 🏗️ 架构
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  Claude Code CLI                                     │
-│  "在 Re=10000 下模拟管道流动..."                      │
-└──────────────┬───────────────────────────────────────┘
-               │ stdio（通过 MCP 协议的 JSON-RPC）
-┌──────────────▼───────────────────────────────────────┐
-│  ansys-mcp-server (Python)                           │
-│  ┌────────────────────────────────────────────────┐  │
-│  │ 24 个 MCP 工具（Fluent、Mechanical、MAPDL、DPF）│  │
-│  └──────────────────┬─────────────────────────────┘  │
-│                     │ Python API 调用                  │
-│  ┌──────────────────▼─────────────────────────────┐  │
-│  │ AnsysClient（PyAnsys 懒加载包装器）             │  │
-│  └──────────────────┬─────────────────────────────┘  │
-└─────────────────────┼────────────────────────────────┘
-                      │
-          ┌───────────┴───────────┐
-          │      PyAnsys          │
-          │  (fluent / mapdl /    │
-          │   mechanical / dpf)   │
-          └───────────┬───────────┘
-                      │
-          ┌───────────▼───────────┐
-          │   Ansys 许可证管理器   │
-          │   (ANSYSLI_SERVER)    │
-          └───────────┬───────────┘
-                      │
-          ┌───────────▼───────────┐
-          │  Ansys 求解器进程      │
-          │  (fluent / mapdl /    │
-          │   mechanical)         │
-          └───────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│  Claude Code CLI                                              │
+│  "做 CFD 然后传到 Mechanical 做应力分析"                      │
+└──────────────────────┬────────────────────────────────────────┘
+                       │ stdio（通过 MCP 协议的 JSON-RPC）
+┌──────────────────────▼────────────────────────────────────────┐
+│  ansys-mcp-server (Python)                                    │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ 30 个 MCP 工具 + 工作流意识                               │  │
+│  │ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐ │  │
+│  │ │ 会话    │ │  网格    │ │  求解    │ │  工作流      │ │  │
+│  │ │  管理   │ │  操作    │ │  后处理  │ │  管道        │ │  │
+│  │ └─────────┘ └──────────┘ └──────────┘ └──────────────┘ │  │
+│  │                      │                                   │  │
+│  │      execute_tui() / scheme.exec() / journal fallback    │  │
+│  └──────────────────────┬────────────────────────────────────┘  │
+│                          │ 3 层递送                              │
+│  ┌──────────────────────▼────────────────────────────────────┐  │
+│  │               LiveAnsysSession（单例）                    │  │
+│  │  一个持久的 Fluent 窗口——从不重复创建                      │  │
+│  │  PID: 12345 | 命令: 47 | 运行时间: 12 分钟                │  │
+│  └──────────────────────┬────────────────────────────────────┘  │
+└─────────────────────────┼──────────────────────────────────────┘
+                          │
+              ┌───────────┴───────────┐
+              │      PyAnsys          │
+              │  (fluent / mapdl /    │
+              │   mechanical / dpf)   │
+              └───────────┬───────────┘
+                          │
+              ┌───────────▼───────────┐
+              │   Ansys 许可证管理器   │
+              │   (ANSYSLI_SERVER)    │
+              └───────────┬───────────┘
+                          │
+              ┌───────────▼───────────┐
+              │  Ansys 求解器进程      │
+              │  (fluent / mapdl /    │
+              │   mechanical)         │
+              │  ┌─────────────────┐  │
+              │  │ GUI 窗口        │  │
+              │  │ • 网格渲染      │  │
+              │  │ • 收敛曲线      │  │
+              │  │ • 场数据        │  │
+              │  └─────────────────┘  │
+              └───────────────────────┘
 ```
+
+**命令递送层级**（每条命令）：
+1. `session.execute_tui()` — 通过 gRPC 直接 TUI 命令（首选）
+2. `session.scheme.exec()` — Scheme 求值（备用）
+3. Journal 文件 + 自动加载（最后手段）
 
 ## ❓ 常见问题
 
 **问：没有许可证能使用吗？**
-答：服务器可以运行，所有工具会返回指导和 API 示例。但实际启动求解器需要已授权的 Ansys 安装。在有有效许可证的机器上，PyAnsys 会自动获取。
+答：服务器可以运行，所有工具会返回指导和示例。但实际启动求解器需要已授权的 Ansys 安装。
 
 **问：支持哪些 Ansys 版本？**
-答：PyAnsys 支持 2024 R1 及以上版本（版本号 241+）。本服务器默认使用 2025 R1 (251)，但接受任何版本。
+答：PyAnsys 支持 2024 R1 及以上版本（版本号 241+）。本服务器默认使用 2025 R1 (251)。
 
-**问：能否在远程 HPC 集群上运行？**
-答：可以 — PyAnsys 支持连接到远程 Fluent/Mechanical 实例。通过 `ANSYS_PLATFORM_INSTANCEMANAGEMENT_CONFIG` (PyPIM) 配置。对于 Slurm 集群，使用 `ansys-mapdl-core` 配合 `launch_mapdl(start_instance=False)`。
+**问：AI 能理解多物理场工作流吗？**
+答：能。服务器包含 `ansys_list_workflows`，描述 CFD、FEA、thermal 和 FSI 的完整流程。AI 知道哪个产品负责什么，以及以什么顺序调用工具。例如，FSI = Fluent（流体）→ Mechanical（结构）中间有网格传递。
 
-**问：这是 Ansys/Synopsys 的官方产品吗？**
-答：不是。这是一个独立的社区项目。Ansys 和 Fluent 是 Ansys Inc. / Synopsys 的商标。
+**问：有没有 `--upgrade` 标志？**
+答：有。`./install.sh --upgrade` 或 `install.bat --upgrade` 拉取最新代码并升级包，**不会修改** `~/.claude/settings.json`。
 
 **问：Claude Code 能运行完整的参数化研究吗？**
-答：能。描述您需要的："运行10个案例，入口速度从1到10 m/s，收集压降数据，绘制图表" — Claude Code 会循环调用工具。
-
-**问：能使用现有的 .cas/.dat/.mechdb/.inp 文件吗？**
-答：能。使用 `ansys_run_simulation` 并将 `input_file` 参数指向您的文件。对于 CAD 几何体（.stp、.iges、.scdoc），先使用 `ansys_load_geometry`。
-
-**问：结果文件会自动保存吗？**
-答：是的。每次仿真后，结果文件会保存到输出目录：Fluent 写入 `.cas.h5` + `.dat.h5`，Mechanical 写入 `.rst`，MAPDL 写入 `.rst/.rth`。您也可以通过 `ansys_export_results` 手动导出为 CSV、VTK、HDF5 或 NPZ 格式。
-
-**问：可以获得哪些结果格式？**
-答：`ansys_export_results` 支持：**CSV**（Excel/Python 分析）、**VTK/VTU**（ParaView 可视化）、**HDF5**（机器学习的高效二进制格式）、**EnSight**（专业后处理器）、**NPZ**（NumPy 兼容）。外加自动生成的 Markdown/HTML/PDF 报告。
-
-**问：支持瞬态（时间相关）仿真吗？**
-答：支持。通过 `ansys_set_parameters` 设置时间步参数：`{"time": "transient", "time_step_size": 0.01, "num_time_steps": 100}`。然后使用 `ansys_get_field_data` 或 `ansys_export_results` 配合 `timesteps` 参数提取特定时间步的数据。
-
-**问：有哪些湍流模型可用？**
-答：通过 Fluent/MAPDL：k-epsilon（标准、RNG、realizable）、k-omega（标准、SST）、Spalart-Allmaras、Reynolds Stress、LES、DES。描述您的需求，Claude Code 会配置正确的模型。
-
-**问：能做多相流仿真吗？**
-答：能 — Fluent 支持 VOF、Eulerian、Mixture 和 DPM 模型。告诉 Claude Code："设置水-空气自由表面的 VOF 模型"，它将通过 `ansys_set_parameters` 配置。
-
-**问：支持 SolidWorks / Catia / NX / Fusion 360 的 CAD 几何体吗？**
-答：支持。将 CAD 导出为 `.stp` 或 `.iges`（标准交换格式），然后使用 `ansys_load_geometry`。所有主流 CAD 工具都支持 STEP/IGES 导出。
-
-**问：可以在 Windows 上使用，而 Ansys 在 Linux 上运行吗？**
-答：可以。MCP 服务器在 Claude Code 所在位置运行。如果 Ansys 在 Linux 工作站上，在那里安装服务器并让 Claude Code 连接到它。也可以使用 SSH 隧道。
+答：能。描述："运行10个案例，入口速度从1到10 m/s，收集压降数据，绘制图表"——Claude Code 会循环调用工具。
 
 **问：如果仿真发散怎么办？**
-答：Claude Code 可以诊断并修复。如果收敛失败，`ansys_get_convergence` 会显示哪些方程有问题。然后 Claude Code 可以调整欠松弛因子、切换到一阶格式或细化网格——全部通过现有工具。
-
-**问：多个用户可以共享一个 Ansys 许可证吗？**
-答：服务器不管理许可证队列——这是 Ansys 许可证管理器的工作。如果许可证服务器有 N 个席位，最多 N 个仿真可以同时运行。超出限制时 PyAnsys 会返回许可证错误。
-
-**问：有速率限制或使用配额吗？**
-答：没有——MCP 服务器没有人为限制。唯一的限制是您的硬件（CPU 核心、RAM）和 Ansys 许可证数量。如果您要求 Claude Code 运行 100 个仿真，它会照做——所以请明确说明您想要什么。
-
-**问：可以在笔记本电脑上运行吗？**
-答：可以，适用于中小型模型。16GB RAM 的笔记本可以处理约 2-5 百万 CFD 单元或约 50 万 FEA 节点的网格。学生许可证与此服务器兼容。
+答：Claude Code 可以诊断并修复。`ansys_get_convergence` 会显示哪些方程有问题。Claude Code 可以调整欠松弛因子、切换到一阶格式或细化网格。
 
 **问：重启电脑后需要手动启动 MCP 服务器吗？**
-答：不需要。如果通过 `settings.json` 配置（`install.sh` 会自动完成），Claude Code CLI 会在启动时自动启动 MCP 服务器。只需打开 Claude Code 即可。手动测试：`./install.sh run`（或 `source .venv/bin/activate && cd src && python -m ansys_mcp_server.server`）。
+答：不需要。如果通过 `settings.json` 配置，Claude Code CLI 会在启动时自动启动 MCP 服务器。
 
-**问：如何检查服务器是否在运行？**
-答：在 Claude Code 中问：*"安装了哪些 Ansys 包？"* — 如果回复了，服务器就在运行。也可以检查进程：`ps aux | grep ansys_mcp_server`。如有问题，验证 `~/.claude/settings.json` 中的路径指向正确的 `.venv/bin/python`。
+**问：这是 Ansys/Synopsys 的官方产品吗？**
+答：不是。这是一个独立的社区项目。
 
 ## 🤝 贡献
 
