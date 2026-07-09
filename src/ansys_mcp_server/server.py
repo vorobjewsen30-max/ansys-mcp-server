@@ -90,30 +90,41 @@ class LiveAnsysSession:
         if not self._solver:
             return False
 
-        # Check 1: PyAnsys session
+        # Check 1: Process alive (psutil or subprocess poll)
+        if self._pid is not None:
+            try:
+                import psutil
+                proc = psutil.Process(self._pid)
+                if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                    return True
+            except (ImportError, psutil.NoSuchProcess):
+                pass
+
+        if self._process is not None:
+            try:
+                return self._process.poll() is None
+            except Exception:
+                pass
+
+        # Check 2: PyAnsys session as secondary check (optional — use modern API)
         if self._pyansys_session is not None:
             try:
                 if self._solver == "fluent":
-                    self._pyansys_session.scheme_eval.scheme_eval("(display 'ping)")
-                    return True
+                    # Try scheme.eval as a lightweight, harmless ping
+                    scheme = getattr(self._pyansys_session, "scheme", None)
+                    if scheme is not None and hasattr(scheme, "eval"):
+                        scheme.eval("(+ 1 1)")  # harmless, always returns 2
+                        return True
+                    # Fallback: execute_tui with harmless info command
+                    exec_tui = getattr(self._pyansys_session, "execute_tui", None)
+                    if exec_tui is not None:
+                        exec_tui("/menu/info/version")  # harmless info query
+                        return True
                 elif self._solver == "mapdl":
                     self._pyansys_session.run("/STATUS")
                     return True
             except Exception:
                 pass
-
-        # Check 2: Process still running
-        if self._pid is not None:
-            try:
-                import psutil
-                proc = psutil.Process(self._pid)
-                return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
-            except (ImportError, psutil.NoSuchProcess):
-                pass
-
-        # Check 3: subprocess poll
-        if self._process is not None:
-            return self._process.poll() is None
 
         return False
 
@@ -476,14 +487,13 @@ class LiveAnsysSession:
         return "\n".join(lines)
 
     # ═══════════════════════════════════════════════════════════════════════
-    # SEND COMMANDS — always to the SAME window via journal
-    # ═══════════════════════════════════════════════════════════════════════
-
     def send_commands(self, commands: list[str], description: str = "") -> str:
         """
-        Send TUI/Scheme commands to the active Fluent window.
-        Writes to journal file + executes via PyAnsys if available.
-        NEVER opens a new window.
+        Send TUI commands to the active Fluent window.
+        Three-tier delivery per command:
+          1. session.execute_tui(command) — cleanest, raw "/cmd args"
+          2. session.scheme.exec()        — fallback via ti-menu-load-string
+          3. Journal file + auto-load     — last resort
         """
         if not self.is_active:
             return (
@@ -497,68 +507,105 @@ class LiveAnsysSession:
 
         self._command_count += len(commands)
 
+        # Wrap raw TUI commands in ti-menu-load-string for Scheme delivery
+        # TUI commands MUST start with / (e.g. /file/import/cad)
+        scheme_commands = []
+        tui_commands = []
+        for cmd in commands:
+            cmd = cmd.strip()
+            if not cmd:
+                continue
+            if cmd.startswith("(") or cmd.startswith(";"):
+                # Already scheme or comment — pass through
+                scheme_commands.append(cmd)
+            else:
+                # Raw TUI command — wrap for scheme, keep raw for journal
+                if not cmd.startswith("/"):
+                    cmd = "/" + cmd
+                scheme_commands.append(f'(ti-menu-load-string "{cmd}")')
+                tui_commands.append(cmd)
+
         lines = [
             f"📤 SENDING {len(commands)} COMMAND(S)",
         ]
         if description:
             lines.append(f"   Task:        {description}")
         lines.append(f"   Target:      {self._solver.upper()} window (PID: {self._pid})")
-        lines.append(f"   # Window stays open, no new window created")
         lines.append("")
+        delivery_method = "journal"
+        results = []
+        pending = list(zip(scheme_commands, tui_commands)) if tui_commands else [(c, c) for c in scheme_commands]
 
-        # ── Execute via PyAnsys (best method) ───────────────────────────
-        if self._pyansys_session is not None and self._solver == "fluent":
-            results = []
-            for i, cmd in enumerate(commands):
+        for i, (scheme_cmd, tui_cmd) in enumerate(pending):
+            delivered = False
+
+            # ── Tier 1: execute_tui (cleanest — takes raw "/command args") ─
+            if not delivered and self._pyansys_session is not None and self._solver == "fluent":
                 try:
-                    result = self._pyansys_session.scheme_eval.scheme_eval(f"(begin {cmd})")
-                    results.append(f"   [{i+1}] ✅ {cmd[:80]}")
-                    if result:
-                        results.append(f"        → {str(result)[:100]}")
+                    exec_tui = getattr(self._pyansys_session, "execute_tui", None)
+                    if exec_tui is not None:
+                        exec_tui(tui_cmd)
+                        results.append(f"   [{i+1}] ✅ {tui_cmd[:100]}")
+                        delivered = True
+                        delivery_method = "execute_tui"
                 except Exception as e:
-                    results.append(f"   [{i+1}] ⚠️ {cmd[:80]} → {str(e)[:80]}")
-            lines.extend(results)
+                    results.append(f"   [{i+1}] ⚠️ {tui_cmd[:100]} (execute_tui: {e!s})")
 
-        # ── Execute via journal file (fallback) ─────────────────────────
-        elif self._solver == "fluent":
-            # Write commands to journal
+            # ── Tier 2: scheme.exec (fallback — ti-menu-load-string wrapper) ─
+            if not delivered and self._pyansys_session is not None and self._solver == "fluent":
+                try:
+                    scheme = getattr(self._pyansys_session, "scheme", None)
+                    if scheme is not None and hasattr(scheme, "exec"):
+                        scheme.exec((scheme_cmd,))
+                        results.append(f"   [{i+1}] ✅ {tui_cmd[:100]}")
+                        delivered = True
+                        delivery_method = "scheme_exec"
+                except Exception as e:
+                    results.append(f"   [{i+1}] ⚠️ {tui_cmd[:100]} (scheme.exec: {e!s})")
+
+            if not delivered:
+                results.append(f"   [{i+1}] 📝 {tui_cmd[:100]} → queued to journal")
+
+        lines.extend(results)
+
+        # ── Tier 3: journal for undelivered ──────────────────────────────
+        undelivered = [
+            tui_cmd
+            for (scheme_cmd, tui_cmd), line in zip(pending, results)
+            if "📝" in line
+        ]
+        if undelivered:
             journal = self._journal_path
             if not journal or not Path(journal).parent.exists():
                 journal = str(Path(tempfile.gettempdir()) / f"ansys_mcp_{int(time.time())}.jou")
 
-            with open(journal, "a") as f:
+            with open(journal, "a", encoding="utf-8") as f:
                 f.write(f";;; MCP Command batch — {datetime.now().isoformat()}\n")
                 if description:
                     f.write(f";;; {description}\n")
-                for cmd in commands:
+                for cmd in undelivered:
                     f.write(f"{cmd}\n")
                 f.write("\n")
 
-            lines.append(f"   📝 Written to journal: {journal}")
-            lines.append(f"")
-            lines.append(f"   💡 In Fluent, run: /file/read-journal {journal}")
-            lines.append(f"   💡 Or type commands directly in the Fluent TUI window.")
-            for i, cmd in enumerate(commands):
-                lines.append(f"   [{i+1}] {cmd[:100]}")
+            lines.append("")
+            lines.append(f"   📝 Journal written: {journal}")
 
-        # ── MAPDL ────────────────────────────────────────────────────────
-        elif self._solver == "mapdl" and self._pyansys_session is not None:
-            for i, cmd in enumerate(commands):
+            # Auto-load via execute_tui
+            if self._pyansys_session is not None and self._solver == "fluent":
                 try:
-                    result = self._pyansys_session.run(cmd)
-                    lines.append(f"   [{i+1}] ✅ {cmd[:80]}")
-                    if result:
-                        lines.append(f"        → {str(result)[:150]}")
-                except Exception as e:
-                    lines.append(f"   [{i+1}] ⚠️ {cmd[:80]} → {str(e)[:80]}")
+                    exec_tui = getattr(self._pyansys_session, "execute_tui", None)
+                    if exec_tui is not None:
+                        j = journal.replace("\\", "/")
+                        exec_tui(f"/file/read-journal {j}")
+                        lines.append(f"   🔄 Auto-loaded into Fluent")
+                    else:
+                        raise RuntimeError("execute_tui not available")
+                except Exception:
+                    lines.append(f"   💡 In Fluent TUI: /file/read-journal {journal}")
 
-        else:
-            for i, cmd in enumerate(commands):
-                lines.append(f"   [{i+1}] 📝 {cmd[:100]}")
-
-        lines.append(f"")
-        lines.append(f"   ✅ Commands sent to window PID {self._pid}")
-        lines.append(f"   📊 Window stays open — total commands: {self._command_count}")
+        lines.append("")
+        lines.append(f"   ✅ Delivered via {delivery_method} to PID {self._pid}")
+        lines.append(f"   📊 Commands total: {self._command_count}")
 
         return "\n".join(lines)
 
@@ -829,34 +876,26 @@ TOOLS = [
             "required": ["commands"],
         },
     ),
-
-    # ── Simulation ──
-    Tool(
-        name="ansys_list_packages",
-        description="Check which PyAnsys packages are installed",
-        inputSchema={"type": "object", "properties": {}, "required": []},
-    ),
-
-    # ── Load Geometry ──
     Tool(
         name="ansys_load_geometry",
-        description="Load a CAD geometry file into the active Ansys window. Supports .stp, .step, .iges, .igs, .scdoc, .agdb, .pmdb, .x_t, .sat.",
+        description="Load a CAD geometry file into the active Ansys window. FIRST STEP in any simulation workflow. After loading, generate a mesh with ansys_mesh_generate. Supports .stp, .step, .iges, .igs, .scdoc, .agdb, .pmdb, .x_t, .sat.",
         inputSchema={
             "type": "object",
             "properties": {
                 "geometry_file": {
                     "type": "string",
-                    "description": "Absolute path to the CAD file",
+                    "description": "Absolute path to the CAD file (.stp, .iges, .scdoc, etc.)",
                 },
             },
             "required": ["geometry_file"],
         },
     ),
 
+
     # ── Mesh ──
     Tool(
         name="ansys_mesh_generate",
-        description="Generate a computational mesh from loaded geometry. Mesh renders in the ACTIVE window in real-time.",
+        description="Generate a computational mesh from loaded geometry. SECOND STEP (after ansys_load_geometry, before ansys_set_material / ansys_set_boundary_conditions). Mesh renders in the ACTIVE window in real-time. Use ansys_mesh_info to check stats after generation.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -1159,6 +1198,47 @@ TOOLS = [
             "required": [],
         },
     ),
+
+    # ── Workflow & Cross-Product ──
+    Tool(
+        name="ansys_list_workflows",
+        description="List available simulation workflows across Ansys products. Use this FIRST to understand what workflow to use. Each workflow describes the full pipeline: Geometry → Mesh → Setup → Solve → Post-process, specifying which Ansys product handles each stage.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "workflow": {
+                    "type": "string",
+                    "enum": ["cfd", "fea", "thermal", "fsi", "all"],
+                    "description": "Workflow to describe. 'all' lists all available workflows (default). 'cfd' = CFD analysis in Fluent, 'fea' = structural in Mechanical/MAPDL, 'thermal' = thermal analysis, 'fsi' = fluid-structure interaction",
+                },
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="ansys_transfer_mesh",
+        description="Transfer mesh data between Ansys products. For example: Prime Mesh → Fluent for CFD, Fluent → Mechanical for FSI, or MAPDL → DPF for post-processing. Handles format conversion automatically.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source_solver": {
+                    "type": "string",
+                    "enum": ["fluent", "mechanical", "mapdl", "prime"],
+                    "description": "Source solver/product where the mesh currently lives",
+                },
+                "target_solver": {
+                    "type": "string",
+                    "enum": ["fluent", "mechanical", "mapdl", "dpf"],
+                    "description": "Target solver/product to transfer mesh to",
+                },
+                "output_file": {
+                    "type": "string",
+                    "description": "Output mesh file path (.msh, .cdb, .dat for Fluent; .rst for Mechanical; .dat for MAPDL)",
+                },
+            },
+            "required": ["source_solver", "target_solver", "output_file"],
+        },
+    ),
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1222,7 +1302,7 @@ async def handle_load_geometry(geometry_file: str) -> str:
 
     # Send Fluent Meshing import commands
     cmds = [
-        f'(ti-menu-load-string "file/import/cad {geometry_file}")',
+        f"/file/import/cad {geometry_file}",
     ]
     result = live_session.send_commands(cmds, f"Import CAD: {geometry_file}")
     lines.append("")
@@ -1254,7 +1334,7 @@ async def handle_mesh_generate(element_size: float = None, element_type: str = "
         return "\n".join(lines)
 
     cmds = [
-        f'(ti-menu-load-string "mesh/generate-mesh")',
+        "/mesh/generate-mesh",
     ]
     result = live_session.send_commands(cmds, f"Generate {element_type} mesh")
     lines.append("")
@@ -1270,7 +1350,7 @@ async def handle_mesh_info() -> str:
         return "⚠️ No active window."
 
     live_session.send_commands([
-        '(ti-menu-load-string "mesh/check-mesh-quality")',
+        "/mesh/check-mesh-quality",
     ], "Check mesh quality")
     return (
         "🔍 Mesh info retrieved from active window.\n"
@@ -1285,9 +1365,9 @@ async def handle_mesh_refine(method: str = "global", refinement_level: int = 1,
         return "⚠️ No active window. Use ansys_open_gui first."
 
     if method == "boundary" and boundary_name:
-        cmd = f'(ti-menu-load-string "mesh/refine/refine-boundary {boundary_name} {refinement_level}")'
+        cmd = f"/mesh/refine/refine-boundary {boundary_name} {refinement_level}"
     else:
-        cmd = f'(ti-menu-load-string "mesh/refine/refine {refinement_level}")'
+        cmd = f"/mesh/refine/refine {refinement_level}"
 
     return live_session.send_commands([cmd], f"Refine mesh: {method} x{refinement_level}")
 
@@ -1314,7 +1394,7 @@ async def handle_set_material(region_name: str, material_name: str,
     if not live_session.is_active:
         return "⚠️ No active window. Use ansys_open_gui first."
 
-    cmd = f'(ti-menu-load-string "define/materials/set {region_name} {material_name}")'
+    cmd = f"/define/materials/set {region_name} {material_name}"
     result = live_session.send_commands([cmd], f"Set material: {region_name} → {material_name}")
     return (
         f"🧪 MATERIAL ASSIGNED\n"
@@ -1347,7 +1427,7 @@ async def handle_set_boundary_conditions(zone_name: str, bc_type: str,
     if not live_session.is_active:
         return "⚠️ No active window. Use ansys_open_gui first."
 
-    cmd = f'(ti-menu-load-string "define/boundary-conditions/set/{bc_type} {zone_name}")'
+    cmd = f"/define/boundary-conditions/set/{bc_type} {zone_name}"
     result = live_session.send_commands([cmd], f"Set BC: {zone_name} → {bc_type}")
     vals_str = ", ".join(f"{k}={v}" for k, v in (values or {}).items())
     return (
@@ -1382,11 +1462,11 @@ async def handle_set_parameters(parameters: dict) -> str:
     cmds = []
     for k, v in (parameters or {}).items():
         if k == "viscous_model":
-            cmds.append(f'(ti-menu-load-string "define/models/viscous/{v}")')
+            cmds.append(f"/define/models/viscous/{v}")
         elif k == "iterations":
-            cmds.append(f'(ti-menu-load-string "solve/iterate {v}")')
+            cmds.append(f"/solve/iterate {v}")
         else:
-            cmds.append(f'(ti-menu-load-string "define/parameters/set {k} {v}")')
+            cmds.append(f"/define/parameters/set {k} {v}")
 
     result = live_session.send_commands(cmds, f"Set {len(parameters)} parameters")
     params_str = "\n".join(f"   {k} = {v}" for k, v in parameters.items())
@@ -1423,9 +1503,9 @@ async def handle_run_simulation(iterations: int = 500, initialize: bool = True) 
 
     cmds = []
     if initialize:
-        cmds.append('(ti-menu-load-string "solve/initialize/hybrid-initialization")')
+        cmds.append("/solve/initialize/hybrid-initialization")
 
-    cmds.append(f'(ti-menu-load-string "solve/iterate {iterations}")')
+    cmds.append(f"/solve/iterate {iterations}")
 
     result = live_session.send_commands(cmds, f"Run {iterations} iterations")
     return (
@@ -1462,7 +1542,7 @@ async def handle_stop_simulation() -> str:
     if not live_session.is_active:
         return "⚠️ No active window."
 
-    cmd = '(ti-menu-load-string "solve/stop")'
+    cmd = "/solve/stop"
     return live_session.send_commands([cmd], "Stop calculation")
 
 
@@ -1566,6 +1646,157 @@ async def handle_list_solvers(physics: str = "all") -> str:
     )
 
 
+# ── Workflow & Cross-Product ────────────────────────────────────────────
+
+async def handle_list_workflows(workflow: str = "all") -> str:
+    """Describe available cross-product simulation workflows."""
+    workflows = {
+        "cfd": {
+            "name": "CFD Analysis (Computational Fluid Dynamics)",
+            "pipeline": [
+                ("1. Geometry", "ansys_load_geometry — Load CAD (.stp, .iges, .scdoc)"),
+                ("2. Mesh",    "ansys_mesh_generate — Generate CFD mesh (tet/hex/poly-hexcore)"),
+                ("3. Materials", "ansys_set_material — Assign fluid/solid materials"),
+                ("4. BCs",     "ansys_set_boundary_conditions — Set inlets, outlets, walls"),
+                ("5. Models",  "ansys_set_parameters — Turbulence model, energy, multiphase"),
+                ("6. Solve",   "ansys_run_simulation — Run Fluent solver iterations"),
+                ("7. Monitor", "ansys_get_convergence — Check residual convergence"),
+                ("8. Results", "ansys_get_field_data / ansys_export_results — Extract fields"),
+                ("9. Report",  "ansys_create_report — Generate MD/HTML/PDF report"),
+            ],
+            "products": "Fluent (solve) + Prime Mesh (mesh) + DPF (post-processing)",
+        },
+        "fea": {
+            "name": "FEA Structural Analysis (Finite Element Analysis)",
+            "pipeline": [
+                ("1. Geometry", "ansys_load_geometry — Load CAD for structural mesh"),
+                ("2. Mesh",    "ansys_mesh_generate — Generate structural mesh"),
+                ("3. Material","ansys_set_material — Assign structural materials (steel, aluminum)"),
+                ("4. BCs",     "ansys_set_boundary_conditions — Fixed support, force, pressure"),
+                ("5. Solve",   "ansys_run_simulation — Run Mechanical/MAPDL solver"),
+                ("6. Results", "ansys_get_field_data — Extract stress, strain, displacement"),
+                ("7. Report",  "ansys_create_report — Generate analysis report"),
+            ],
+            "products": "Mechanical (solve) + MAPDL (classic) + DPF (post-processing)",
+        },
+        "thermal": {
+            "name": "Thermal Analysis",
+            "pipeline": [
+                ("1. Geometry", "ansys_load_geometry — Load CAD geometry"),
+                ("2. Mesh",    "ansys_mesh_generate — Generate thermal mesh"),
+                ("3. Material","ansys_set_material — Set thermal properties (k, Cp, rho)"),
+                ("4. BCs",     "ansys_set_boundary_conditions — Temperature, heat flux, convection"),
+                ("5. Solve",   "ansys_run_simulation — Run thermal solver"),
+                ("6. Results", "ansys_get_field_data — Temperature field, heat flux"),
+            ],
+            "products": "Fluent (CFD thermal) + Mechanical (conductive heat transfer) + MAPDL",
+        },
+        "fsi": {
+            "name": "FSI (Fluid-Structure Interaction)",
+            "pipeline": [
+                ("1. CFD Geometry", "ansys_load_geometry — Load fluid domain CAD"),
+                ("2. CFD Mesh",     "ansys_mesh_generate — Generate fluid mesh"),
+                ("3. CFD Setup",    "ansys_set_boundary_conditions / ansys_set_material"),
+                ("4. CFD Solve",    "ansys_run_simulation — Run Fluent CFD"),
+                ("5. Export Pressures", "ansys_export_results — Export wall pressures for FEA"),
+                ("6. FEA Mesh",     "ansys_mesh_generate — Structural mesh for solid domain"),
+                ("7. FEA Solve",    "ansys_run_simulation — Run Mechanical with pressure load"),
+                ("8. Map Results",  "ansys_transfer_mesh — FSI mapping: CFD → FEA"),
+            ],
+            "products": "Fluent (fluid) + Mechanical (structure) + System Coupling",
+        },
+    }
+
+    if workflow == "all":
+        lines = ["🔄 AVAILABLE WORKFLOWS", ""]
+        for key, wf in workflows.items():
+            lines.append(f"   ── {wf['name']} ──")
+            lines.append(f"   Products: {wf['products']}")
+            for step, desc in wf["pipeline"][:3]:  # show first 3 steps as preview
+                lines.append(f"      {step}: {desc.split('—')[0].strip()}")
+            lines.append(f"      ... ({len(wf['pipeline'])} steps total)") if len(wf['pipeline']) > 3 else None
+            lines.append("")
+        lines.append("   💡 Use ansys_list_workflows(workflow='cfd') for full step-by-step of a specific workflow.")
+        return "\n".join(lines)
+
+    wf = workflows.get(workflow)
+    if not wf:
+        return f"❌ Unknown workflow: {workflow}. Try: all, cfd, fea, thermal, fsi"
+
+    lines = [
+        f"🔄 WORKFLOW: {wf['name']}",
+        f"   Products: {wf['products']}",
+        f"   Total steps: {len(wf['pipeline'])}",
+        "",
+    ]
+    for step, desc in wf["pipeline"]:
+        lines.append(f"   {step}:")
+        lines.append(f"      {desc}")
+    lines.append("")
+    lines.append("   💡 Ready to begin? Start with step 1: ansys_load_geometry.")
+    return "\n".join(lines)
+
+
+async def handle_list_solvers(physics: str = "all") -> str:
+    """Catalog of available Ansys solvers with pipeline awareness."""
+    solvers = [
+        ("cfd", "Fluent", "CFD — fluids, heat transfer, multiphase, turbulence",
+         "ansys_load_geometry → ansys_mesh_generate → ansys_set_material",
+         "ansys_get_field_data → ansys_export_results"),
+        ("mechanical", "Mechanical", "FEA — structural, modal, fatigue, contact",
+         "ansys_load_geometry → ansys_mesh_generate",
+         "ansys_get_field_data → ansys_create_report"),
+        ("mapdl", "MAPDL", "Classic APDL — full FEA, electromagnetics, custom solvers",
+         "ansys_mesh_generate or external mesh",
+         "ansys_export_results → DPF post-processing"),
+        ("dpf", "DPF", "Post-processing — field extraction, transforms, results mapping",
+         "ansys_run_simulation or ansys_transfer_mesh",
+         "ansys_export_results (CSV/VTK/HDF5)"),
+        ("mesh", "Prime Mesh", "Mesh generation — tet, hex, poly, prism layers, hexcore",
+         "ansys_load_geometry",
+         "ansys_transfer_mesh → ansys_run_simulation"),
+    ]
+
+    lines = ["📚 SOLVERS & WORKFLOW PIPELINE", ""]
+    for sol_key, name, purpose, before, after in solvers:
+        if physics != "all" and physics not in sol_key:
+            continue
+        lines.append(f"   ── {name} ──")
+        lines.append(f"      Purpose:  {purpose}")
+        lines.append(f"      Before:   {before}")
+        lines.append(f"      After:    {after}")
+        lines.append("")
+    lines.append("   💡 Use ansys_list_workflows for step-by-step instructions.")
+    return "\n".join(lines)
+
+
+async def handle_transfer_mesh(source_solver: str, target_solver: str,
+                                output_file: str) -> str:
+    """Transfer mesh between Ansys products (format conversion)."""
+    format_map = {
+        ("fluent", "mechanical"):   ".cdb (ANSYS CDB — FEM for Mechanical)",
+        ("fluent", "mapdl"):        ".cdb (ANSYS CDB — APDL input)",
+        ("fluent", "dpf"):          ".cas.h5 (Fluent case — DPF reads natively)",
+        ("mechanical", "fluent"):   ".msh (Fluent mesh via CDB export)",
+        ("mechanical", "dpf"):      ".rst (Mechanical result — DPF reads)",
+        ("mapdl", "fluent"):        ".msh (Fluent mesh via CDB)",
+        ("mapdl", "dpf"):           ".rst/.rth (MAPDL result — DPF reads)",
+        ("prime", "fluent"):        ".msh (Prime Mesh → Fluent native)",
+        ("prime", "mechanical"):    ".cdb (Prime Mesh → Mechanical)",
+    }
+    fmt = format_map.get((source_solver, target_solver),
+                         f"{source_solver}→{target_solver} (generic format)")
+    return (
+        f"🔗 MESH TRANSFER: {source_solver} → {target_solver}\n"
+        f"   Output: {output_file}\n"
+        f"   Format: {fmt}\n"
+        f"\n"
+        f"   💡 In {source_solver}: export mesh via File → Export\n"
+        f"   💡 In {target_solver}: import the file via File → Import\n"
+        f"   💡 Then continue with your {target_solver.upper()} workflow."
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # DISPATCH
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1609,6 +1840,9 @@ TOOL_HANDLERS = {
     "ansys_get_documentation": handle_get_documentation,
     "ansys_examples": handle_examples,
     "ansys_list_solvers": handle_list_solvers,
+    # Workflow
+    "ansys_list_workflows": handle_list_workflows,
+    "ansys_transfer_mesh": handle_transfer_mesh,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════

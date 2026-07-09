@@ -11,7 +11,7 @@
 # ║    ./install.sh install-mapdl      Install with MAPDL support                 ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
-set -e
+set -euo pipefail
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -34,6 +34,15 @@ echo ""
 
 # ── Parse command ─────────────────────────────────────────────────────────────
 INSTALL_MODE="${1:-base}"
+
+# Parse --upgrade flag (second argument)
+UPGRADE_FLAG=0
+if [ "${2:-}" = "--upgrade" ] || [ "${1:-}" = "--upgrade" ]; then
+    UPGRADE_FLAG=1
+fi
+if [ "${1:-}" = "--upgrade" ]; then
+    INSTALL_MODE="upgrade"
+fi
 
 # ── Check Python ──────────────────────────────────────────────────────────────
 echo -e "${BOLD}[1/4]${RESET} Checking Python..."
@@ -64,12 +73,18 @@ source "$VENV_DIR/bin/activate"
 echo ""
 echo -e "${BOLD}[3/4]${RESET} Installing dependencies..."
 
-# Upgrade pip
-pip install --upgrade pip --quiet
+# Upgrade pip (non-fatal)
+pip install --upgrade pip --quiet || true
 
-# Install base MCP
-pip install mcp --quiet
-echo -e "${GREEN}✓${RESET} Base MCP SDK installed"
+# Install base MCP SDK
+echo -e "${BOLD}  Installing MCP SDK...${RESET}"
+if pip install mcp; then
+    echo -e "${GREEN}✓${RESET} Base MCP SDK installed"
+else
+    echo -e "${RED}✗ Failed to install MCP SDK${RESET}"
+    echo "  Check internet connection or proxy settings."
+    exit 1
+fi
 
 case "$INSTALL_MODE" in
     base)
@@ -78,41 +93,101 @@ case "$INSTALL_MODE" in
         echo "    Use ${CYAN}./install.sh install-all${RESET} for all products"
         ;;
     run)
-        # Skip install, go to run
         ;;
     install-fluent)
         echo "  Installing ansys-fluent-core..."
-        pip install ansys-fluent-core --quiet
-        echo -e "${GREEN}✓${RESET} Fluent CFD support installed"
+        if pip install ansys-fluent-core; then
+            echo -e "${GREEN}✓${RESET} Fluent CFD support installed"
+        else
+            echo -e "${YELLOW}⚠ ansys-fluent-core NOT installed (non-fatal)${RESET}"
+        fi
         ;;
     install-mechanical)
         echo "  Installing ansys-mechanical-core..."
-        pip install ansys-mechanical-core --quiet
-        echo -e "${GREEN}✓${RESET} Mechanical FEA support installed"
+        if pip install ansys-mechanical-core; then
+            echo -e "${GREEN}✓${RESET} Mechanical FEA support installed"
+        else
+            echo -e "${YELLOW}⚠ ansys-mechanical-core NOT installed (non-fatal)${RESET}"
+        fi
         ;;
     install-mapdl)
         echo "  Installing ansys-mapdl-core..."
-        pip install ansys-mapdl-core --quiet
-        echo -e "${GREEN}✓${RESET} MAPDL support installed"
+        if pip install ansys-mapdl-core; then
+            echo -e "${GREEN}✓${RESET} MAPDL support installed"
+        else
+            echo -e "${YELLOW}⚠ ansys-mapdl-core NOT installed (non-fatal)${RESET}"
+        fi
         ;;
     install-dpf)
         echo "  Installing ansys-dpf-core..."
-        pip install ansys-dpf-core --quiet
-        echo -e "${GREEN}✓${RESET} DPF support installed"
+        if pip install ansys-dpf-core; then
+            echo -e "${GREEN}✓${RESET} DPF support installed"
+        else
+            echo -e "${YELLOW}⚠ ansys-dpf-core NOT installed (non-fatal)${RESET}"
+        fi
         ;;
     install-meshing)
         echo "  Installing ansys-meshing-prime..."
-        pip install ansys-meshing-prime --quiet
-        echo -e "${GREEN}✓${RESET} Meshing support installed"
+        if pip install ansys-meshing-prime; then
+            echo -e "${GREEN}✓${RESET} Meshing support installed"
+        else
+            echo -e "${YELLOW}⚠ ansys-meshing-prime NOT installed (non-fatal)${RESET}"
+        fi
         ;;
     install-all)
         echo "  Installing all Ansys packages..."
-        pip install ansys-fluent-core ansys-mechanical-core ansys-mapdl-core ansys-dpf-core ansys-meshing-prime --quiet
-        echo -e "${GREEN}✓${RESET} All Ansys products installed"
+        if pip install ansys-fluent-core ansys-mechanical-core ansys-mapdl-core ansys-dpf-core ansys-meshing-prime; then
+            echo -e "${GREEN}✓${RESET} All Ansys products installed"
+        else
+            echo -e "${YELLOW}⚠ Some Ansys packages NOT installed (non-fatal)${RESET}"
+        fi
+        ;;
+    upgrade)
+        echo -e "${BOLD}  Upgrading Ansys MCP Server...${RESET}"
+        echo ""
+        # Git pull
+        if command -v git &>/dev/null; then
+            echo -e "${BOLD}  Pulling latest code from git...${RESET}"
+            git pull || echo -e "${YELLOW}⚠ git pull failed — continuing with local files${RESET}"
+        else
+            echo -e "${YELLOW}○${RESET} Git not found — keeping local files"
+        fi
+        # Activate venv
+        if [ ! -f "$VENV_DIR/bin/python" ]; then
+            echo -e "${RED}✗ No venv found. Run ./install.sh first.${RESET}"
+            exit 1
+        fi
+        source "$VENV_DIR/bin/activate"
+        # Upgrade MCP SDK
+        echo -e "${BOLD}  Upgrading MCP SDK...${RESET}"
+        if pip install --upgrade mcp; then
+            echo -e "${GREEN}✓${RESET} MCP SDK upgraded"
+        else
+            echo -e "${RED}✗ Failed to upgrade MCP SDK${RESET}"
+            exit 1
+        fi
+        # Upgrade any installed Ansys packages
+        for pkg in ansys-fluent-core ansys-mechanical-core ansys-mapdl-core ansys-dpf-core ansys-meshing-prime; do
+            if pip list 2>/dev/null | grep -qi "$pkg"; then
+                echo -e "${BOLD}  Upgrading $pkg...${RESET}"
+                pip install --upgrade "$pkg" || echo -e "${YELLOW}⚠ $pkg upgrade skipped${RESET}"
+            fi
+        done
+        echo ""
+        echo -e "${GREEN}✓${RESET} Upgrade complete — config unchanged"
+        echo -e "${YELLOW}○${RESET} Claude Code settings were NOT modified"
+        echo ""
+        echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${RESET}"
+        echo -e "${CYAN}║  ✅ UPGRADE COMPLETE                                       ║${RESET}"
+        echo -e "${CYAN}║  Config kept as-is — no changes to ~/.claude/settings.json ║${RESET}"
+        echo -e "${CYAN}║                                                              ║${RESET}"
+        echo -e "${CYAN}║  To verify: restart Claude Code CLI                         ║${RESET}"
+        echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${RESET}"
+        exit 0
         ;;
     *)
         echo -e "${RED}✗ Unknown mode: $INSTALL_MODE${RESET}"
-        echo "  Usage: ./install.sh [base|run|install-fluent|install-mechanical|install-mapdl|install-dpf|install-meshing|install-all]"
+        echo "  Usage: ./install.sh [base|run|install-fluent|install-mechanical|install-mapdl|install-dpf|install-meshing|install-all|--upgrade]"
         exit 1
         ;;
 esac

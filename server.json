@@ -4,8 +4,11 @@
   "title": "Ansys MCP Server",
   "description": "Give Claude Code CLI direct control over Ansys engineering simulations — CFD in Fluent, FEA in Mechanical, meshing, and post-processing. 26 tools. Persistent GUI mode with single-window real-time rendering.",
   "version": "2.0.0",
-  "website": "https://github.com/vorobjewsen30-max/ansys-mcp-server",
-  "documentation": "https://github.com/vorobjewsen30-max/ansys-mcp-server/blob/main/README.md",
+  "websiteUrl": "https://github.com/vorobjewsen30-max/ansys-mcp-server",
+  "repository": {
+    "url": "https://github.com/vorobjewsen30-max/ansys-mcp-server",
+    "source": "github"
+  },
   "license": "MIT",
   "categories": [
     "engineering",
@@ -39,6 +42,8 @@
     "mesh",
     "post-processing",
     "scientific-computing",
-    "hpc"
+    "hpc",
+    "workflow",
+    "multi-physics"
   ]
 }
